@@ -1,0 +1,165 @@
+import uvicorn
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from motor.motor_asyncio import AsyncIOMotorClient
+import logging
+import datetime
+import os
+
+from core.config import get_settings
+from routers import auth, pets, users
+# TODO: Add new router imports as they are created
+# from routers import transactions, chat, reviews, admin, notifications, payments
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app.log')
+    ]
+)
+
+# Load application settings
+settings = get_settings()
+
+# Create upload directory if it doesn't exist
+if not os.path.exists(settings.UPLOAD_DIRECTORY):
+    os.makedirs(settings.UPLOAD_DIRECTORY)
+
+# Lifespan context manager for startup and shutdown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    app.mongodb_client = AsyncIOMotorClient(settings.MONGODB_URI)
+    app.mongodb = app.mongodb_client.pet_rent_earn_db
+    
+    # Create indexes
+    await create_database_indexes(app.mongodb)
+    
+    yield
+    # Shutdown
+    if hasattr(app, 'mongodb_client'):
+        app.mongodb_client.close()
+
+async def create_database_indexes(database):
+    """Create necessary database indexes for better performance"""
+    # User indexes
+    await database.users.create_index("email", unique=True)
+    await database.users.create_index("google_id", sparse=True)
+    
+    # Pet listing indexes
+    await database.pets.create_index([("location.coordinates", "2dsphere")])
+    await database.pets.create_index("owner_id")
+    await database.pets.create_index("status")
+    await database.pets.create_index("created_at")
+    await database.pets.create_index("featured")
+    
+    # Transaction indexes
+    await database.transactions.create_index("buyer_id")
+    await database.transactions.create_index("seller_id")
+    await database.transactions.create_index("pet_id")
+    await database.transactions.create_index("status")
+    
+    # Conversation indexes
+    await database.conversations.create_index("participants")
+    await database.conversations.create_index("last_message_at")
+    
+    # Review indexes
+    await database.reviews.create_index("pet_id")
+    await database.reviews.create_index("reviewer_id")
+    await database.reviews.create_index("reviewed_user_id")
+
+# Create FastAPI app
+app = FastAPI(
+    title="Pet Rent & Earn API",
+    description="API for pet rental and earning platform - rent pets, earn money, connect pet lovers",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        # Add production URLs here
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+# Mount static files for uploads
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIRECTORY), name="uploads")
+
+# Include routers with API prefix
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(pets.router, prefix="/api/pets", tags=["Pet Listings"])
+app.include_router(users.router, prefix="/api/users", tags=["User Management"])
+
+# TODO: Include new routers as they are created
+# app.include_router(transactions.router, prefix="/api/transactions", tags=["Transactions"])
+# app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
+# app.include_router(chat.router, prefix="/api/conversations", tags=["Chat & Messaging"])
+# app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews & Ratings"])
+# app.include_router(admin.router, prefix="/api/admin", tags=["Admin Panel"])
+# app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
+
+# Health check endpoint
+@app.get("/health", tags=["health"])
+async def health_check():
+    return {
+        "status": "ok", 
+        "timestamp": datetime.datetime.utcnow(),
+        "service": "Pet Rent & Earn API"
+    }
+
+# API info endpoint
+@app.get("/api", tags=["info"])
+async def api_info():
+    return {
+        "name": "Pet Rent & Earn API",
+        "version": "1.0.0",
+        "description": "API for pet rental and earning platform",
+        "endpoints": {
+            "auth": "/api/auth",
+            "pets": "/api/pets",
+            "transactions": "/api/transactions",
+            "chat": "/api/conversations",
+            "reviews": "/api/reviews",
+            "admin": "/api/admin",
+            "notifications": "/api/notifications"
+        }
+    }
+
+# Add debug middleware to log request details (development only)
+@app.middleware("http")
+async def log_requests(request, call_next):
+    logger = logging.getLogger("request_logger")
+
+    # Log request details
+    logger.debug(f"Request: {request.method} {request.url}")
+    
+    # Check for Authorization header specifically
+    auth_header = request.headers.get("Authorization")
+    if auth_header:
+        logger.debug(f"Authorization header present: {auth_header[:20]}...")
+    else:
+        logger.debug("No Authorization header found")
+
+    response = await call_next(request)
+
+    # Log response status
+    logger.debug(f"Response status: {response.status_code}")
+
+    return response
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
