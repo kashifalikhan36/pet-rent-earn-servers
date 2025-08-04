@@ -9,7 +9,7 @@ import datetime
 import os
 
 from core.config import get_settings
-from routers import auth, pets, users
+from routers import auth, pets, users, transactions
 # TODO: Add new router imports as they are created
 # from routers import transactions, chat, reviews, admin, notifications, payments
 
@@ -105,9 +105,10 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIRECTORY), name="uploads")
 
 # Include routers with API prefix
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(pets.router, prefix="/api/pets", tags=["Pet Listings"])
-app.include_router(users.router, prefix="/api/users", tags=["User Management"])
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(users.router, prefix="/api/users", tags=["users"])
+app.include_router(pets.router, prefix="/api/pets", tags=["pets"])
+app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])
 
 # TODO: Include new routers as they are created
 # app.include_router(transactions.router, prefix="/api/transactions", tags=["Transactions"])

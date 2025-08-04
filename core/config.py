@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     FROM_EMAIL: str = ""
     FRONTEND_URL: str = "http://localhost:3000"
     
+    # API Base URL for full URLs in responses
+    API_BASE_URL: str = "https://api.cvflow.tech"
+    
     # Google OAuth settings
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""

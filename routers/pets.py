@@ -143,6 +143,15 @@ async def get_pets_nearby(
     return await get_nearby_pets(latitude, longitude, radius, request, limit)
 
 
+@router.get("/my-listings", response_model=List[PetOut])
+async def get_my_pet_listings(
+    request: Request,
+    current_user = Depends(get_current_active_user)
+):
+    """Get current user's pet listings"""
+    return await get_user_pet_listings(current_user["id"], request)
+
+
 @router.get("/{pet_id}", response_model=PetOut)
 async def get_pet_details(pet_id: str, request: Request):
     """Get single pet details"""

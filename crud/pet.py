@@ -4,6 +4,22 @@ from models.pet import PetModel
 from schemas.pet import PetCreate, PetUpdate
 import uuid
 from datetime import datetime
+from core.config import get_settings
+
+settings = get_settings()
+
+def add_photo_base_url(pet: Dict[str, Any]) -> Dict[str, Any]:
+    """Add base URL to photo URLs in pet data"""
+    if pet and "photos" in pet and pet["photos"]:
+        for photo in pet["photos"]:
+            if "url" in photo and photo["url"].startswith("/"):
+                photo["url"] = f"{settings.API_BASE_URL}{photo['url']}"
+    return pet
+
+
+def add_photo_base_urls(pets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Add base URL to photo URLs in a list of pets"""
+    return [add_photo_base_url(pet) for pet in pets]
 
 
 async def create_pet_listing(pet_data, owner_id, request) -> Dict[str, Any]:
@@ -73,6 +89,7 @@ async def create_pet_listing(pet_data, owner_id, request) -> Dict[str, Any]:
             "featured": False,
             "view_count": 0,
             "favorite_count": 0,
+            "photos": [],  # Initialize photos array
             "created_at": now,
             "updated_at": now
         }
@@ -81,8 +98,8 @@ async def create_pet_listing(pet_data, owner_id, request) -> Dict[str, Any]:
         result = await database.pets.insert_one(pet_document)
         pet_id = str(result.inserted_id)
         
-        # Get the inserted pet
-        pet = await get_pet_by_id(pet_id, request)
+        # Get the inserted pet with photos base URL added
+        pet = await get_pet_by_id(pet_id, request, increment_views=False)
         return pet
         
     except Exception as e:
@@ -101,13 +118,14 @@ async def get_pet_by_id(pet_id: str, request: Request, increment_views: bool = T
         # Update the view count in the returned pet
         pet["view_count"] = pet.get("view_count", 0) + 1
     
-    return pet
+    return add_photo_base_url(pet)
 
 
 async def get_user_pet_listings(user_id: str, request: Request) -> List[Dict[str, Any]]:
     """Get all pet listings for a user"""
     database = request.app.mongodb
-    return await PetModel.get_pets_by_owner(user_id, database)
+    pets = await PetModel.get_pets_by_owner(user_id, database)
+    return add_photo_base_urls(pets)
 
 
 async def update_pet_listing(pet_id: str, pet_data: PetUpdate, owner_id: str, request: Request) -> Optional[Dict[str, Any]]:
@@ -123,9 +141,10 @@ async def update_pet_listing(pet_id: str, pet_data: PetUpdate, owner_id: str, re
     update_dict = {k: v for k, v in pet_data.dict().items() if v is not None}
     
     if not update_dict:
-        return existing_pet
+        return add_photo_base_url(existing_pet)
     
-    return await PetModel.update_pet(pet_id, update_dict, database)
+    updated_pet = await PetModel.update_pet(pet_id, update_dict, database)
+    return add_photo_base_url(updated_pet)
 
 
 async def delete_pet_listing(pet_id: str, owner_id: str, request: Request) -> bool:
@@ -148,13 +167,15 @@ async def search_pets(
 ) -> List[Dict[str, Any]]:
     """Search pets with filters"""
     database = request.app.mongodb
-    return await PetModel.search_pets(filters, database, skip, limit)
+    pets = await PetModel.search_pets(filters, database, skip, limit)
+    return add_photo_base_urls(pets)
 
 
 async def get_featured_pets(request: Request, limit: int = 10) -> List[Dict[str, Any]]:
     """Get featured pet listings"""
     database = request.app.mongodb
-    return await PetModel.get_featured_pets(database, limit)
+    pets = await PetModel.get_featured_pets(database, limit)
+    return add_photo_base_urls(pets)
 
 
 async def add_pet_to_favorites(user_id: str, pet_id: str, request: Request) -> bool:
@@ -197,7 +218,8 @@ async def remove_pet_from_favorites(user_id: str, pet_id: str, request: Request)
 async def get_user_favorite_pets(user_id: str, request: Request) -> List[Dict[str, Any]]:
     """Get user's favorite pets"""
     database = request.app.mongodb
-    return await PetModel.get_user_favorites(user_id, database)
+    pets = await PetModel.get_user_favorites(user_id, database)
+    return add_photo_base_urls(pets)
 
 
 async def upload_pet_photo(pet_id: str, file, photo_data, owner_id: str, request: Request) -> Optional[Dict[str, Any]]:
@@ -256,6 +278,8 @@ async def upload_pet_photo(pet_id: str, file, photo_data, owner_id: str, request
         )
         
         if result.modified_count > 0:
+            # Add base URL to the photo URL
+            photo["url"] = f"{settings.API_BASE_URL}{photo['url']}"
             return photo
         return None
         
@@ -287,7 +311,7 @@ async def get_pet_analytics(pet_id: str, owner_id: str, request: Request) -> Opt
     database = request.app.mongodb
     
     # Check if pet exists and is owned by user
-    pet = await PetModel.get_pet_by_id(pet_id, database)
+    pet = await get_pet_by_id(pet_id, request, increment_views=False)
     if not pet or pet["owner_id"] != owner_id:
         return None
     
@@ -318,7 +342,8 @@ async def update_pet_status(pet_id: str, status: str, owner_id: str, request: Re
     if not pet or pet["owner_id"] != owner_id:
         return None
     
-    return await PetModel.update_pet(pet_id, {"status": status}, database)
+    updated_pet = await PetModel.update_pet(pet_id, {"status": status}, database)
+    return add_photo_base_url(updated_pet)
 
 
 async def get_nearby_pets(latitude: float, longitude: float, radius_km: int, request: Request, limit: int = 20) -> List[Dict[str, Any]]:
@@ -332,4 +357,5 @@ async def get_nearby_pets(latitude: float, longitude: float, radius_km: int, req
         "radius": radius_km * 1000  # Convert to meters
     }
     
-    return await PetModel.search_pets(filters, database, 0, limit) 
+    pets = await PetModel.search_pets(filters, database, 0, limit)
+    return add_photo_base_urls(pets) 
