@@ -6,22 +6,88 @@ import uuid
 from datetime import datetime
 
 
-async def create_pet_listing(pet_data: PetCreate, owner_id: str, request: Request) -> Optional[Dict[str, Any]]:
-    """Create a new pet listing"""
-    database = request.app.mongodb
+async def create_pet_listing(pet_data, owner_id, request) -> Dict[str, Any]:
+    """
+    Create a new pet listing in the database.
     
-    # Convert to dict and add owner info
-    pet_dict = pet_data.dict()
-    pet_dict["owner_id"] = owner_id
-    pet_dict["status"] = "active"
-    pet_dict["featured"] = False
-    pet_dict["photos"] = []
-    pet_dict["view_count"] = 0
-    pet_dict["favorite_count"] = 0
-    pet_dict["review_count"] = 0
-    pet_dict["average_rating"] = None
-    
-    return await PetModel.create_pet(pet_dict, database)
+    Args:
+        pet_data: Dictionary or Pydantic model with pet data
+        owner_id: ID of the pet owner
+        request: FastAPI request object with database access
+        
+    Returns:
+        Created pet object or None if failed
+    """
+    try:
+        database = request.app.mongodb
+        from bson import ObjectId
+        
+        # Convert to dict if it's a Pydantic model
+        if hasattr(pet_data, "dict"):
+            pet_dict = pet_data.dict()
+        else:
+            pet_dict = dict(pet_data)
+            
+        # Set default values
+        now = datetime.utcnow()
+        
+        # Create database document
+        pet_document = {
+            "owner_id": owner_id,
+            "name": pet_dict.get("name"),
+            "type": pet_dict.get("type"),
+            "breed": pet_dict.get("breed"),
+            "age": int(pet_dict.get("age", 0)),
+            "description": pet_dict.get("description"),
+            "gender": pet_dict.get("gender"),
+            "location": pet_dict.get("location"),
+            
+            # Listing type and pricing
+            "listingType": pet_dict.get("listingType", "rent"),
+            "price": float(pet_dict.get("price", 0)) if pet_dict.get("price") else None,
+            "dailyRate": float(pet_dict.get("dailyRate", 0)) if pet_dict.get("dailyRate") else None,
+            "rentalType": pet_dict.get("rentalType"),
+            "minRentalDays": int(pet_dict.get("minRentalDays", 1)) if pet_dict.get("minRentalDays") else None,
+            "maxRentalDays": int(pet_dict.get("maxRentalDays", 30)) if pet_dict.get("maxRentalDays") else None,
+            
+            # Dates
+            "availableFrom": pet_dict.get("availableFrom"),
+            "availableTo": pet_dict.get("availableTo"),
+            
+            # Pet characteristics
+            "size": pet_dict.get("size"),
+            "weight": float(pet_dict.get("weight")) if pet_dict.get("weight") else None,
+            "color": pet_dict.get("color"),
+            
+            # Health and care
+            "vaccinated": bool(pet_dict.get("vaccinated", False)),
+            "spayedNeutered": bool(pet_dict.get("spayedNeutered", False)),
+            "microchipped": bool(pet_dict.get("microchipped", False)),
+            "healthCertificate": bool(pet_dict.get("healthCertificate", False)),
+            "good_with_kids": bool(pet_dict.get("good_with_kids", False)),
+            "good_with_pets": bool(pet_dict.get("good_with_pets", False)),
+            "specialNeeds": pet_dict.get("specialNeeds"),
+            
+            # Status and metadata
+            "status": "active",
+            "featured": False,
+            "view_count": 0,
+            "favorite_count": 0,
+            "created_at": now,
+            "updated_at": now
+        }
+        
+        # Insert pet into database
+        result = await database.pets.insert_one(pet_document)
+        pet_id = str(result.inserted_id)
+        
+        # Get the inserted pet
+        pet = await get_pet_by_id(pet_id, request)
+        return pet
+        
+    except Exception as e:
+        print(f"Error creating pet listing: {str(e)}")
+        return None
 
 
 async def get_pet_by_id(pet_id: str, request: Request, increment_views: bool = True) -> Optional[Dict[str, Any]]:
@@ -134,40 +200,68 @@ async def get_user_favorite_pets(user_id: str, request: Request) -> List[Dict[st
     return await PetModel.get_user_favorites(user_id, database)
 
 
-async def upload_pet_photo(pet_id: str, file_url: str, owner_id: str, request: Request, caption: str = None, is_primary: bool = False) -> Optional[Dict[str, Any]]:
-    """Add photo to pet listing"""
+async def upload_pet_photo(pet_id: str, file, photo_data, owner_id: str, request: Request) -> Optional[Dict[str, Any]]:
+    """Add photo to pet listing
+    
+    Args:
+        pet_id: ID of the pet
+        file: UploadFile object containing the image
+        photo_data: Dictionary with caption and is_primary flag
+        owner_id: ID of the pet owner
+        request: FastAPI request object
+        
+    Returns:
+        Photo object or None if failed
+    """
     database = request.app.mongodb
+    from bson import ObjectId
     
-    # Check if pet exists and is owned by user
-    pet = await PetModel.get_pet_by_id(pet_id, database)
-    if not pet or pet["owner_id"] != owner_id:
-        return None
-    
-    # Create photo object
-    photo = {
-        "id": str(uuid.uuid4()),
-        "url": file_url,
-        "caption": caption,
-        "is_primary": is_primary,
-        "uploaded_at": datetime.utcnow()
-    }
-    
-    # If this is primary, unset other primary photos
-    if is_primary:
-        await database.pets.update_one(
-            {"_id": pet["_id"]},
-            {"$set": {"photos.$[].is_primary": False}}
+    try:
+        # Check if pet exists and is owned by user
+        pet = await get_pet_by_id(pet_id, request, increment_views=False)
+        if not pet or pet["owner_id"] != owner_id:
+            return None
+        
+        # Upload file and get URL
+        from utils.file_upload import upload_image_file
+        file_url = await upload_image_file(file, "pets")
+        
+        if not file_url:
+            return None
+            
+        # Extract photo data
+        caption = photo_data.get("caption") if isinstance(photo_data, dict) else None
+        is_primary = photo_data.get("is_primary", False) if isinstance(photo_data, dict) else False
+        
+        # Create photo object
+        photo = {
+            "id": str(uuid.uuid4()),
+            "url": file_url,
+            "caption": caption,
+            "is_primary": is_primary,
+            "uploaded_at": datetime.utcnow()
+        }
+        
+        # If this is primary, unset other primary photos
+        if is_primary:
+            await database.pets.update_one(
+                {"_id": ObjectId(pet_id)},
+                {"$set": {"photos.$[].is_primary": False}}
+            )
+        
+        # Add photo to pet
+        result = await database.pets.update_one(
+            {"_id": ObjectId(pet_id)},
+            {"$push": {"photos": photo}}
         )
-    
-    # Add photo to pet
-    result = await database.pets.update_one(
-        {"_id": pet["_id"]},
-        {"$push": {"photos": photo}}
-    )
-    
-    if result.modified_count > 0:
-        return photo
-    return None
+        
+        if result.modified_count > 0:
+            return photo
+        return None
+        
+    except Exception as e:
+        print(f"Error uploading pet photo: {str(e)}")
+        return None
 
 
 async def delete_pet_photo(pet_id: str, photo_id: str, owner_id: str, request: Request) -> bool:

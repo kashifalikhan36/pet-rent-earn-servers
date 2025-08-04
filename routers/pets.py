@@ -1,21 +1,23 @@
+from fastapi import APIRouter, Depends, HTTPException, Request, status, File, Form, UploadFile, Query
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from datetime import datetime
 
 from schemas.pet import (
-    PetCreate, PetUpdate, PetOut, PetSearchFilters, PetSearchResponse,
-    PetPhotoUpload, PetPhotoOut, PetStatusUpdate, PetAnalytics
+    PetCreate, PetOut, PetUpdate, PetSearchFilters, PetPhotoOut,
+    PetSearchResponse, PetStatusUpdate, ListingType, RentalType,
+    PetAnalytics
 )
 from dependencies.auth import get_current_active_user
 from crud.pet import (
     create_pet_listing, get_pet_by_id, get_user_pet_listings,
     update_pet_listing, delete_pet_listing, search_pets,
-    get_featured_pets, add_pet_to_favorites, remove_pet_from_favorites,
-    get_user_favorite_pets, upload_pet_photo, delete_pet_photo,
+    get_featured_pets, upload_pet_photo, delete_pet_photo,
+    add_pet_to_favorites, remove_pet_from_favorites, get_user_favorite_pets,
     get_pet_analytics, update_pet_status, get_nearby_pets
 )
 from utils.file_upload import upload_image_file
 import logging
+from datetime import datetime
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -157,20 +159,159 @@ async def get_pet_details(pet_id: str, request: Request):
 
 @router.post("", response_model=PetOut)
 async def create_pet(
-    pet_data: PetCreate,
     request: Request,
+    name: str = Form(...),
+    type: str = Form(...),
+    breed: str = Form(...),
+    age: int = Form(...),
+    description: str = Form(...),
+    location: str = Form(...),
+    listingType: str = Form(...),
+    price: Optional[float] = Form(None),
+    dailyRate: Optional[float] = Form(None),
+    rentalType: Optional[str] = Form(None),
+    minRentalDays: Optional[int] = Form(None),
+    maxRentalDays: Optional[int] = Form(None),
+    availableFrom: Optional[str] = Form(None),
+    availableTo: Optional[str] = Form(None),
+    gender: Optional[str] = Form(None),
+    size: Optional[str] = Form(None),
+    color: Optional[str] = Form(None),
+    weight: Optional[float] = Form(None),
+    vaccinated: Optional[bool] = Form(False),
+    spayedNeutered: Optional[bool] = Form(False),
+    microchipped: Optional[bool] = Form(False),
+    healthCertificate: Optional[bool] = Form(False),
+    good_with_kids: Optional[bool] = Form(False),
+    good_with_pets: Optional[bool] = Form(False),
+    specialNeeds: Optional[str] = Form(None),
+    photos: List[UploadFile] = File(...),
     current_user = Depends(get_current_active_user)
 ):
-    """Create new pet listing"""
-    pet = await create_pet_listing(pet_data, current_user["id"], request)
+    """Create new pet listing with photos
     
-    if not pet:
+    Accepts multipart/form-data with all pet fields and one or more photos.
+    At least one photo is required.
+    """
+    try:
+        # Validate at least one photo
+        if not photos or len(photos) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one photo is required"
+            )
+            
+        # Parse dates if provided
+        available_from = None
+        available_to = None
+        
+        if availableFrom:
+            try:
+                available_from = datetime.fromisoformat(availableFrom)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid availableFrom date format. Use ISO format (YYYY-MM-DD)"
+                )
+                
+        if availableTo:
+            try:
+                available_to = datetime.fromisoformat(availableTo)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid availableTo date format. Use ISO format (YYYY-MM-DD)"
+                )
+
+        # Create pet data object
+        pet_data = {
+            "name": name,
+            "type": type,
+            "breed": breed,
+            "age": age,
+            "description": description,
+            "location": location,
+            "listingType": listingType,
+            "gender": gender,
+            "size": size,
+            "color": color,
+            "weight": weight,
+            "vaccinated": vaccinated,
+            "spayedNeutered": spayedNeutered,
+            "microchipped": microchipped,
+            "healthCertificate": healthCertificate,
+            "good_with_kids": good_with_kids,
+            "good_with_pets": good_with_pets,
+            "specialNeeds": specialNeeds,
+            "availableFrom": available_from,
+            "availableTo": available_to,
+        }
+        
+        # Add conditional fields based on listing type
+        if listingType == "sale":
+            if not price:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Price is required for sale listings"
+                )
+            pet_data["price"] = price
+        elif listingType == "rent":
+            if not all([dailyRate, rentalType, minRentalDays, maxRentalDays]):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="dailyRate, rentalType, minRentalDays, and maxRentalDays are required for rental listings"
+                )
+            pet_data["dailyRate"] = dailyRate
+            pet_data["rentalType"] = rentalType
+            pet_data["minRentalDays"] = minRentalDays
+            pet_data["maxRentalDays"] = maxRentalDays
+            
+            # Validate rental days
+            if int(minRentalDays) > int(maxRentalDays):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="minRentalDays cannot be greater than maxRentalDays"
+                )
+            
+        # Create pet in database
+        pet = await create_pet_listing(pet_data, current_user["id"], request)
+        
+        if not pet:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create pet listing"
+            )
+        
+        # Upload all photos
+        try:
+            for i, file in enumerate(photos):
+                # The first photo is primary
+                is_primary = (i == 0)
+                
+                # Upload photo and associate with pet
+                photo_data = {
+                    "caption": f"{name} photo {i+1}",
+                    "is_primary": is_primary
+                }
+                
+                await upload_pet_photo(pet["id"], file, photo_data, current_user["id"], request)
+                
+        except Exception as e:
+            logger.error(f"Error uploading pet photos: {str(e)}")
+            # We won't fail the whole request if some photos fail to upload
+            
+        # Get updated pet with photos
+        updated_pet = await get_pet_by_id(pet["id"], request)
+        return updated_pet
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating pet listing: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create pet listing"
         )
-    
-    return pet
 
 
 @router.put("/{pet_id}", response_model=PetOut)
@@ -221,12 +362,15 @@ async def upload_pet_photos(
 ):
     """Upload pet photos"""
     try:
-        # Upload file and get URL
-        file_url = await upload_image_file(file, "pets")
+        # Create photo data
+        photo_data = {
+            "caption": caption,
+            "is_primary": is_primary
+        }
         
         # Add photo to pet
         photo = await upload_pet_photo(
-            pet_id, file_url, current_user["id"], request, caption, is_primary
+            pet_id, file, photo_data, current_user["id"], request
         )
         
         if not photo:
