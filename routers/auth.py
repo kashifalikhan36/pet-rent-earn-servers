@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import RedirectResponse
 
-from schemas.user import UserCreate, UserOut, GoogleOAuthCallback, GoogleAuthResponse, ForgotPasswordRequest, ResetPasswordRequest, PasswordResetResponse, EmailCheckResponse
+from schemas.user import UserCreate, UserOut, GoogleOAuthCallback, GoogleAuthResponse, ForgotPasswordRequest, ResetPasswordRequest, PasswordResetResponse, EmailCheckResponse, UserLogin
 from schemas.token import Token
 from crud.user import create_user, authenticate_user, create_google_user, request_password_reset, reset_password_with_token, get_user_by_reset_token
 from core.security import create_access_token
@@ -73,28 +73,91 @@ async def login(
     """
     Authenticate a user and return an access token.
     """
+    logger.debug(f"Login attempt for username: {form_data.username}")
+    
     # Get client IP address and user agent for analytics
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent", "")
     
-    # Authenticate user
-    user = await authenticate_user(form_data.username, form_data.password)
+    try:
+        # Authenticate user
+        user = await authenticate_user(form_data.username, form_data.password)
+        
+        if not user:
+            logger.warning(f"Authentication failed for username: {form_data.username}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        logger.info(f"Authentication successful for user: {user['email']}")
+        
+        # Create access token
+        token_data = {"sub": user["id"], "role": user["role"]}
+        token = create_access_token(
+            token_data,
+            expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
+        )
+        
+        return Token(access_token=token, token_type="bearer")
     
-    if not user:
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-    )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Login failed"
+        )
+
+
+@router.post("/login-json", response_model=Token)
+async def login_json(
+    request: Request,
+    user_data: UserLogin
+):
+    """
+    Authenticate a user using JSON data and return an access token.
+    Alternative endpoint for clients that prefer JSON over form data.
+    """
+    logger.debug(f"JSON login attempt for email: {user_data.email}")
     
-    # Create access token
-    token_data = {"sub": user["id"], "role": user["role"]}
-    token = create_access_token(
-        token_data,
-        expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
-    )
+    # Get client IP address and user agent for analytics
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent", "")
     
-    return Token(access_token=token, token_type="bearer")
+    try:
+        # Authenticate user
+        user = await authenticate_user(user_data.email, user_data.password)
+        
+        if not user:
+            logger.warning(f"Authentication failed for email: {user_data.email}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        logger.info(f"Authentication successful for user: {user['email']}")
+        
+        # Create access token
+        token_data = {"sub": user["id"], "role": user["role"]}
+        token = create_access_token(
+            token_data,
+            expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
+        )
+        
+        return Token(access_token=token, token_type="bearer")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"JSON login error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Login failed"
+        )
 
 
 @router.post("/logout")
@@ -348,3 +411,59 @@ async def verify_reset_token(token: str):
             "valid": False,
             "message": "Failed to verify token"
     }
+
+
+@router.get("/debug/test-auth")
+async def debug_test_auth():
+    """
+    Debug endpoint to test authentication system.
+    Should be removed in production.
+    """
+    try:
+        from core.config import get_settings
+        settings = get_settings()
+        
+        return {
+            "status": "Auth system operational",
+            "jwt_configured": bool(settings.JWT_SECRET_KEY),
+            "mongodb_configured": bool(settings.MONGODB_URI),
+            "endpoints": {
+                "login_form": "/api/auth/login (form data: username, password)",
+                "login_json": "/api/auth/login-json (JSON: email, password)",
+                "register": "/api/auth/register (JSON: name, email, password)"
+            },
+            "expected_formats": {
+                "login_form": "Content-Type: application/x-www-form-urlencoded",
+                "login_json": "Content-Type: application/json",
+                "register": "Content-Type: application/json"
+            }
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/debug/create-test-user")
+async def debug_create_test_user():
+    """
+    Debug endpoint to create a test user.
+    Should be removed in production.
+    """
+    try:
+        from schemas.user import UserCreate
+        test_user = UserCreate(
+            name="Test User",
+            email="test@example.com",
+            password="testpassword123"
+        )
+        
+        user = await create_user(test_user)
+        if user:
+            return {
+                "status": "Test user created successfully",
+                "user_id": user["id"],
+                "email": user["email"]
+            }
+        else:
+            return {"status": "User already exists or creation failed"}
+    except Exception as e:
+        return {"error": str(e)}

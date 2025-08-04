@@ -115,11 +115,28 @@ app.include_router(users.router, prefix="/api/users", tags=["User Management"])
 # Health check endpoint
 @app.get("/health", tags=["health"])
 async def health_check():
-    return {
-        "status": "ok", 
-        "timestamp": datetime.datetime.utcnow(),
-        "service": "Pet Rent & Earn API"
-    }
+    try:
+        # Test database connection
+        if hasattr(app, 'mongodb'):
+            await app.mongodb.admin.command('ping')
+            db_status = "connected"
+        else:
+            db_status = "not_initialized"
+        
+        return {
+            "status": "ok", 
+            "timestamp": datetime.datetime.utcnow(),
+            "service": "Pet Rent & Earn API",
+            "database": db_status,
+            "version": "1.0.0"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "timestamp": datetime.datetime.utcnow(),
+            "service": "Pet Rent & Earn API",
+            "error": str(e)
+        }
 
 # API info endpoint
 @app.get("/api", tags=["info"])

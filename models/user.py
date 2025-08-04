@@ -10,7 +10,7 @@ settings = get_settings()
 
 # Create MongoDB client
 client = AsyncIOMotorClient(settings.MONGODB_URI)
-db = client.humantext_db
+db = client.pet_rent_earn_db
 users_collection = db.users
 
 
@@ -220,18 +220,6 @@ class UserModel:
             
             current_date += timedelta(days=1)
         
-        # Get conversion rate
-        from models.conversion import conversions_collection
-        
-        pipeline = [
-            {"$group": {"_id": "$user_id"}}
-        ]
-        
-        distinct_users_result = await conversions_collection.aggregate(pipeline).to_list(length=None)
-        users_with_conversions = len(distinct_users_result)
-        
-        conversion_rate = (users_with_conversions / total_users) * 100 if total_users > 0 else 0
-        
         return {
             "total_users": total_users,
             "active_users_last_24h": active_users_24h,
@@ -240,10 +228,6 @@ class UserModel:
             "admin_users": admin_users,
             "new_signups_today": new_signups_today,
             "new_signups_last_7d": new_signups_7d,
-            "conversion_rate": {
-                "users_with_conversions": users_with_conversions,
-                "percentage": round(conversion_rate, 1)
-            },
             "user_growth": daily_growth
         }
 
@@ -302,32 +286,12 @@ class UserModel:
             mongodb_sort_field, sort_dir
         ).skip(skip).limit(limit)
         
-        from models.conversion import conversions_collection
-        
         async for user in cursor:
             user_id = user["_id"]
             user["id"] = str(user_id)
-            
-            # Get conversion count if filters require it
-            conversion_count = 0
-            if min_conversions is not None or max_conversions is not None or sort_by == "conversions":
-                conversion_count = await conversions_collection.count_documents({"user_id": user_id})
-                
-            # Filter by conversion count
-            if min_conversions is not None and conversion_count < min_conversions:
-                continue
-            if max_conversions is not None and conversion_count > max_conversions:
-                continue
-                
-            user["conversion_count"] = conversion_count
             user.pop("password_hash", None)
             user.pop("_id", None)
             users.append(user)
-        
-        # If sorting by conversions, do it in Python after getting counts
-        if sort_by == "conversions":
-            users.sort(key=lambda x: x.get("conversion_count", 0), 
-                      reverse=(sort_dir == -1))
         
         total_count = await users_collection.count_documents(filter_query)
         
@@ -355,41 +319,8 @@ class UserModel:
         # Combine activity from different sources
         activities = []
         
-        # 1. Get login activities
-        from models.analytics import login_attempts_collection
-        
-        login_cursor = login_attempts_collection.find({
-            "email": user["email"],
-            "timestamp": {"$gte": start_date}
-        }).sort("timestamp", -1)
-        
-        async for login in login_cursor:
-            activities.append({
-                "type": "login",
-                "timestamp": login["timestamp"],
-                "status": login.get("status", "unknown"),
-                "ip_address": login.get("ip_address"),
-                "user_agent": login.get("user_agent")
-            })
-        
-        # 2. Get conversion activities
-        from models.conversion import conversions_collection
-        
-        conversion_cursor = conversions_collection.find({
-            "user_id": ObjectId(user_id),
-            "created_at": {"$gte": start_date}
-        }).sort("created_at", -1)
-        
-        async for conversion in conversion_cursor:
-            activities.append({
-                "type": "conversion",
-                "timestamp": conversion["created_at"],
-                "conversion_id": str(conversion["_id"]),
-                "text_length": len(conversion["original_text"])
-            })
-        
-        # 3. Get profile update activities - would need a proper activity log
-        # For this example, we'll just check if the user has profile updates
+        # Note: Login and conversion tracking would be implemented when those features are added
+        # For now, return basic user activity structure
         
         # Combine all activities and sort by timestamp
         activities.sort(key=lambda x: x["timestamp"], reverse=True)

@@ -1,11 +1,17 @@
 import os
 import uuid
-import magic
 from typing import Optional
 from fastapi import UploadFile, HTTPException, status
 from PIL import Image
 import io
 from core.config import get_settings
+
+# Optional magic import for file type detection
+try:
+    import magic
+    MAGIC_AVAILABLE = True
+except ImportError:
+    MAGIC_AVAILABLE = False
 
 settings = get_settings()
 
@@ -30,17 +36,18 @@ async def upload_image_file(file: UploadFile, subfolder: str = "general") -> str
             detail=f"File size exceeds maximum allowed size of {settings.MAX_FILE_SIZE / (1024*1024):.1f}MB"
         )
     
-    # Verify file type using python-magic
-    try:
-        mime_type = magic.from_buffer(content, mime=True)
-        if not mime_type.startswith('image/'):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid image file"
-            )
-    except Exception:
-        # Fallback if python-magic is not available
-        pass
+    # Verify file type using python-magic if available
+    if MAGIC_AVAILABLE:
+        try:
+            mime_type = magic.from_buffer(content, mime=True)
+            if not mime_type.startswith('image/'):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid image file"
+                )
+        except Exception:
+            # Fallback if python-magic fails
+            pass
     
     # Get file extension
     file_extension = os.path.splitext(file.filename)[1].lower()

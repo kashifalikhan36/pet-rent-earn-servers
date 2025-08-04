@@ -185,7 +185,7 @@ async def get_user_by_reset_token(token: str) -> Optional[Dict[str, Any]]:
     return await UserModel.get_user_by_reset_token(token)
 
 
-async def get_user_by_id(user_id: str, request) -> Optional[Dict[str, Any]]:
+async def get_user_by_id_with_request(user_id: str, request) -> Optional[Dict[str, Any]]:
     """Get user by ID with request context."""
     database = request.app.mongodb
     from bson import ObjectId
@@ -199,7 +199,7 @@ async def get_user_by_id(user_id: str, request) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def update_user_profile(user_id: str, user_data: UserProfileUpdate, request) -> Optional[Dict[str, Any]]:
+async def update_user_profile_basic(user_id: str, user_data: UserProfileUpdate, request) -> Optional[Dict[str, Any]]:
     """Update user profile with new data."""
     database = request.app.mongodb
     from bson import ObjectId
@@ -209,7 +209,7 @@ async def update_user_profile(user_id: str, user_data: UserProfileUpdate, reques
         update_dict = {k: v for k, v in user_data.dict().items() if v is not None}
         
         if not update_dict:
-            return await get_user_by_id(user_id, request)
+            return await get_user_by_id_with_request(user_id, request)
         
         update_dict["updated_at"] = datetime.utcnow()
         
@@ -219,7 +219,7 @@ async def update_user_profile(user_id: str, user_data: UserProfileUpdate, reques
         )
         
         if result.modified_count > 0:
-            return await get_user_by_id(user_id, request)
+            return await get_user_by_id_with_request(user_id, request)
         return None
     except Exception as e:
         print(f"Error updating user profile: {e}")
@@ -254,7 +254,7 @@ async def update_wallet_balance(user_id: str, amount: float, transaction_type: s
     
     try:
         # Get current user to check balance
-        user = await get_user_by_id(user_id, request)
+        user = await get_user_by_id_with_request(user_id, request)
         if not user:
             return None
         

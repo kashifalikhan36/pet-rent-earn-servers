@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 
 from schemas.user import UserOut, UserProfileUpdate, WalletUpdate, VerificationSubmission
 from dependencies.auth import get_current_active_user
-from crud.user import get_user_by_id, update_user_profile, upload_user_avatar, update_wallet_balance, submit_verification_documents, get_verification_status
+from crud.user import get_user_by_id_with_request, update_user_profile_basic, upload_user_avatar, update_wallet_balance, submit_verification_documents, get_verification_status
 from utils.file_upload import upload_image_file, upload_document_file
 import logging
 
@@ -27,7 +27,7 @@ async def update_user_profile_endpoint(
     current_user = Depends(get_current_active_user)
 ):
     """Update user profile"""
-    updated_user = await update_user_profile(current_user["id"], user_data, request)
+    updated_user = await update_user_profile_basic(current_user["id"], user_data, request)
     
     if not updated_user:
         raise HTTPException(
@@ -77,7 +77,7 @@ async def get_public_user_profile(
     request: Request
 ):
     """Get public user profile"""
-    user = await get_user_by_id(user_id, request)
+    user = await get_user_by_id_with_request(user_id, request)
     
     if not user:
         raise HTTPException(

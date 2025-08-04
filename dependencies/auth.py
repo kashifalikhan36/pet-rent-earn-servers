@@ -11,7 +11,7 @@ from schemas.token import TokenPayload
 from crud.user import get_user_by_id
 
 settings = get_settings()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 # Set up logging
 logger = logging.getLogger(__name__)
