@@ -162,6 +162,7 @@ class VerificationSubmission(BaseModel):
 
 class UserDetailedOut(UserOut):
     """Schema for detailed user profile output with stats."""
+    email: Optional[EmailStr] = None
     total_pets: int = 0
     active_pets: int = 0
     average_rating: float = 0.0
