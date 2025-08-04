@@ -360,3 +360,235 @@ async def get_verification_status(user_id: str, request) -> Dict[str, Any]:
     except Exception as e:
         print(f"Error getting verification status: {e}")
         return {"status": "unverified"}
+
+
+async def get_detailed_user_profile(user_id: str, request) -> Optional[Dict[str, Any]]:
+    """Get detailed user profile with stats."""
+    try:
+        database = request.app.mongodb
+        from bson import ObjectId
+        
+        # Get base user profile
+        user = await get_user_by_id_with_request(user_id, request)
+        if not user:
+            return None
+            
+        # Count user's pets
+        total_pets = await database.pets.count_documents({"owner_id": user_id})
+        active_pets = await database.pets.count_documents({"owner_id": user_id, "status": "active"})
+        
+        # Get average rating from reviews
+        pipeline = [
+            {"$match": {"reviewer_id": user_id}},
+            {"$group": {"_id": None, "average": {"$avg": "$rating"}, "count": {"$sum": 1}}}
+        ]
+        reviews = await database.pet_reviews.aggregate(pipeline).to_list(1)
+        
+        # Calculate response metrics from conversations
+        response_pipeline = [
+            {"$match": {"participants": user_id}},
+            {"$unwind": "$messages"},
+            {"$match": {"messages.sender_id": user_id}},
+            {"$group": {
+                "_id": "$_id",
+                "response_time": {"$avg": {"$subtract": ["$messages.created_at", "$created_at"]}}
+            }},
+            {"$group": {
+                "_id": None,
+                "avg_response_time": {"$avg": "$response_time"},
+                "count": {"$sum": 1}
+            }}
+        ]
+        response_stats = await database.conversations.aggregate(response_pipeline).to_list(1)
+        
+        # Get booking stats
+        total_bookings = await database.bookings.count_documents({
+            "$or": [{"owner_id": user_id}, {"renter_id": user_id}]
+        })
+        
+        completed_bookings = await database.bookings.count_documents({
+            "$or": [{"owner_id": user_id}, {"renter_id": user_id}],
+            "status": "completed"
+        })
+        
+        cancelled_bookings = await database.bookings.count_documents({
+            "$or": [{"owner_id": user_id}, {"renter_id": user_id}],
+            "status": "cancelled"
+        })
+        
+        # Calculate completion rate
+        completion_rate = 100.0
+        if total_bookings > 0:
+            completion_rate = (completed_bookings / total_bookings) * 100
+            
+        # Build detailed profile
+        detailed_profile = {
+            **user,
+            "total_pets": total_pets,
+            "active_pets": active_pets,
+            "average_rating": reviews[0]["average"] if reviews else 0.0,
+            "review_count": reviews[0]["count"] if reviews else 0,
+            "response_rate": 0.0,  # TODO: Calculate from messages
+            "response_time": int(response_stats[0]["avg_response_time"] / 60000) if response_stats else 0,  # Convert ms to minutes
+            "member_since": user.get("created_at", datetime.utcnow()),
+            "verified_id": user.get("verification_status") == "verified",
+            "verified_phone": bool(user.get("phone_verified")),
+            "verified_email": bool(user.get("email_verified")),
+            "total_bookings": total_bookings,
+            "completion_rate": completion_rate,
+            "languages": user.get("languages", ["English"]),
+            "social_links": user.get("social_links", {})
+        }
+        
+        return detailed_profile
+        
+    except Exception as e:
+        print(f"Error getting detailed user profile: {e}")
+        return None
+
+
+async def get_pet_owner_profile(pet_id: str, request) -> Optional[Dict[str, Any]]:
+    """Get pet owner profile from a pet ID."""
+    try:
+        database = request.app.mongodb
+        from bson import ObjectId
+        
+        # Get pet to find owner ID
+        pet = await database.pets.find_one({"_id": ObjectId(pet_id)})
+        if not pet:
+            return None
+            
+        owner_id = pet.get("owner_id")
+        if not owner_id:
+            return None
+            
+        # Get owner profile with detailed stats
+        owner_profile = await get_detailed_user_profile(owner_id, request)
+        
+        return {
+            "id": owner_profile["id"],
+            "name": owner_profile["name"],
+            "avatar_url": owner_profile.get("avatar_url"),
+            "bio": owner_profile.get("bio"),
+            "location": owner_profile.get("location"),
+            "verification_status": owner_profile.get("verification_status", "unverified"),
+            "average_rating": owner_profile.get("average_rating", 0.0),
+            "review_count": owner_profile.get("review_count", 0),
+            "response_rate": owner_profile.get("response_rate", 0.0),
+            "response_time": owner_profile.get("response_time", 0),
+            "member_since": owner_profile.get("member_since"),
+            "total_pets": owner_profile.get("total_pets", 0),
+            "languages": owner_profile.get("languages", ["English"]),
+            "completion_rate": owner_profile.get("completion_rate", 100.0)
+        }
+        
+    except Exception as e:
+        print(f"Error getting pet owner profile: {e}")
+        return None
+
+
+async def get_user_dashboard_analytics(user_id: str, request) -> Dict[str, Any]:
+    """Get user dashboard analytics."""
+    try:
+        database = request.app.mongodb
+        from bson import ObjectId
+        
+        # Calculate earnings data
+        earnings_pipeline = [
+            {"$match": {"owner_id": user_id, "status": "completed"}},
+            {"$group": {
+                "_id": None,
+                "total_earnings": {"$sum": "$total_amount"},
+                "completed_count": {"$sum": 1}
+            }}
+        ]
+        earnings_data = await database.bookings.aggregate(earnings_pipeline).to_list(1)
+        
+        # Calculate pending earnings
+        pending_pipeline = [
+            {"$match": {"owner_id": user_id, "status": "accepted"}},
+            {"$group": {
+                "_id": None,
+                "pending_earnings": {"$sum": "$total_amount"},
+                "pending_count": {"$sum": 1}
+            }}
+        ]
+        pending_data = await database.bookings.aggregate(pending_pipeline).to_list(1)
+        
+        # Get recent bookings (last 30 days)
+        thirty_days_ago = datetime.utcnow() - datetime.timedelta(days=30)
+        recent_bookings = await database.bookings.count_documents({
+            "owner_id": user_id,
+            "created_at": {"$gte": thirty_days_ago}
+        })
+        
+        recent_earnings_pipeline = [
+            {"$match": {
+                "owner_id": user_id, 
+                "status": "completed",
+                "created_at": {"$gte": thirty_days_ago}
+            }},
+            {"$group": {
+                "_id": None,
+                "recent_earnings": {"$sum": "$total_amount"},
+                "recent_count": {"$sum": 1}
+            }}
+        ]
+        recent_earnings = await database.bookings.aggregate(recent_earnings_pipeline).to_list(1)
+        
+        # Get pet view counts
+        pet_ids = []
+        async for pet in database.pets.find({"owner_id": user_id}):
+            pet_ids.append(pet["_id"])
+            
+        total_views = 0
+        if pet_ids:
+            view_pipeline = [
+                {"$match": {"_id": {"$in": pet_ids}}},
+                {"$group": {"_id": None, "total_views": {"$sum": "$view_count"}}}
+            ]
+            view_data = await database.pets.aggregate(view_pipeline).to_list(1)
+            total_views = view_data[0]["total_views"] if view_data else 0
+        
+        # Get profile views
+        profile_views = await database.profile_views.count_documents({"profile_id": user_id})
+        
+        # Calculate response time/rate
+        total_inquiries = await database.conversations.count_documents({"participants": user_id})
+        
+        # Build analytics data
+        analytics = {
+            "total_earnings": earnings_data[0]["total_earnings"] if earnings_data else 0.0,
+            "pending_earnings": pending_data[0]["pending_earnings"] if pending_data else 0.0,
+            "active_bookings": pending_data[0]["pending_count"] if pending_data else 0,
+            "pending_requests": 0,  # TODO: Calculate from booking requests
+            "completed_bookings": earnings_data[0]["completed_count"] if earnings_data else 0,
+            "cancelled_bookings": 0,  # TODO: Calculate from bookings
+            "profile_views": profile_views,
+            "pet_views": total_views,
+            "inquiry_response_rate": 0.0,  # TODO: Calculate from conversations
+            "average_response_time": 0,  # TODO: Calculate from conversations
+            "bookings_last_30_days": recent_bookings,
+            "earnings_last_30_days": recent_earnings[0]["recent_earnings"] if recent_earnings else 0.0,
+            "completion_rate": 100.0  # TODO: Calculate from bookings
+        }
+        
+        return analytics
+        
+    except Exception as e:
+        print(f"Error getting user dashboard analytics: {e}")
+        return {
+            "total_earnings": 0.0,
+            "pending_earnings": 0.0,
+            "active_bookings": 0,
+            "pending_requests": 0,
+            "completed_bookings": 0,
+            "cancelled_bookings": 0,
+            "profile_views": 0,
+            "pet_views": 0,
+            "inquiry_response_rate": 0.0,
+            "average_response_time": 0,
+            "bookings_last_30_days": 0,
+            "earnings_last_30_days": 0.0,
+            "completion_rate": 100.0
+        }

@@ -268,3 +268,22 @@ class PetAnalytics(BaseModel):
     total_earnings: float = 0.0
     last_30_days_views: int = 0
     last_30_days_bookings: int = 0 
+
+
+class PetReview(BaseModel):
+    rating: float = Field(..., ge=1, le=5, description="Rating from 1 to 5 stars")
+    comment: str = Field(..., min_length=3, max_length=1000)
+    
+    
+class PetReviewCreate(PetReview):
+    pass
+
+
+class PetReviewOut(PetReview):
+    id: str
+    pet_id: str
+    reviewer_id: str
+    reviewer_name: str
+    reviewer_avatar: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None 

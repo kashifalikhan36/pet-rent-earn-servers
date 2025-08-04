@@ -9,9 +9,9 @@ import datetime
 import os
 
 from core.config import get_settings
-from routers import auth, pets, users, transactions
+from routers import auth, pets, users, transactions, conversations, bookings
 # TODO: Add new router imports as they are created
-# from routers import transactions, chat, reviews, admin, notifications, payments
+# from routers import reviews, admin, notifications, payments
 
 # Configure logging
 logging.basicConfig(
@@ -109,14 +109,14 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(pets.router, prefix="/api/pets", tags=["pets"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])
+app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
+app.include_router(bookings.router, prefix="/api/bookings", tags=["bookings"])
 
 # TODO: Include new routers as they are created
-# app.include_router(transactions.router, prefix="/api/transactions", tags=["Transactions"])
-# app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
-# app.include_router(chat.router, prefix="/api/conversations", tags=["Chat & Messaging"])
 # app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews & Ratings"])
 # app.include_router(admin.router, prefix="/api/admin", tags=["Admin Panel"])
 # app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
+# app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 
 # Health check endpoint
 @app.get("/health", tags=["health"])

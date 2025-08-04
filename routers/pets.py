@@ -1,23 +1,27 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status, File, Form, UploadFile, Query
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 
 from schemas.pet import (
     PetCreate, PetOut, PetUpdate, PetSearchFilters, PetPhotoOut,
     PetSearchResponse, PetStatusUpdate, ListingType, RentalType,
-    PetAnalytics
+    PetAnalytics, PetReviewCreate, PetReviewOut
 )
+from schemas.user import OwnerProfileOut
+from schemas.booking import AvailabilityResponse
 from dependencies.auth import get_current_active_user
 from crud.pet import (
     create_pet_listing, get_pet_by_id, get_user_pet_listings,
     update_pet_listing, delete_pet_listing, search_pets,
     get_featured_pets, upload_pet_photo, delete_pet_photo,
     add_pet_to_favorites, remove_pet_from_favorites, get_user_favorite_pets,
-    get_pet_analytics, update_pet_status, get_nearby_pets
+    get_pet_analytics, update_pet_status, get_nearby_pets,
+    create_pet_review, get_pet_reviews
 )
+from crud.user import get_pet_owner_profile
+from crud.booking import check_pet_availability
 from utils.file_upload import upload_image_file
 import logging
-from datetime import datetime
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -521,3 +525,101 @@ async def get_user_favorites_endpoint(
         )
     
     return await get_user_favorite_pets(user_id, request) 
+
+
+@router.get("/{pet_id}/reviews", response_model=List[PetReviewOut])
+async def get_pet_reviews_endpoint(
+    pet_id: str,
+    request: Request,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=50)
+):
+    """Get reviews for a pet"""
+    skip = (page - 1) * per_page
+    reviews = await get_pet_reviews(pet_id, request, skip, per_page)
+    return reviews
+
+
+@router.post("/{pet_id}/reviews", response_model=PetReviewOut)
+async def create_pet_review_endpoint(
+    pet_id: str,
+    review: PetReviewCreate,
+    request: Request,
+    current_user = Depends(get_current_active_user)
+):
+    """Create a review for a pet"""
+    user_id = current_user["id"]
+    user_name = current_user.get("name", "Anonymous User")
+    user_avatar = current_user.get("avatar_url")
+    
+    created_review = await create_pet_review(
+        pet_id, 
+        review.dict(), 
+        user_id, 
+        user_name, 
+        user_avatar, 
+        request
+    )
+    
+    if not created_review:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pet not found"
+        )
+    
+    return created_review 
+
+
+@router.get("/{pet_id}/owner", response_model=OwnerProfileOut)
+async def get_pet_owner_details(
+    pet_id: str,
+    request: Request
+):
+    """Get detailed owner profile for a pet"""
+    owner_profile = await get_pet_owner_profile(pet_id, request)
+    
+    if not owner_profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pet or owner not found"
+        )
+    
+    return owner_profile 
+
+
+@router.get("/{pet_id}/availability", response_model=AvailabilityResponse)
+async def check_pet_availability_endpoint(
+    pet_id: str,
+    start_date: date,
+    end_date: date,
+    request: Request
+):
+    """Check if pet is available for booking in the given date range"""
+    try:
+        # Check if pet exists
+        pet = await get_pet_by_id(pet_id, request, increment_views=False)
+        if not pet:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pet not found"
+            )
+            
+        # Verify dates
+        if start_date > end_date:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Start date must be before end date"
+            )
+            
+        # Check availability
+        database = request.app.mongodb
+        availability = await check_pet_availability(pet_id, start_date, end_date, database)
+        
+        return availability
+        
+    except Exception as e:
+        logger.error(f"Error checking availability: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to check availability"
+        ) 

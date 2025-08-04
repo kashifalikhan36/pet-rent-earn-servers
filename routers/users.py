@@ -2,9 +2,13 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 
-from schemas.user import UserOut, UserProfileUpdate, WalletUpdate, VerificationSubmission
+from schemas.user import UserOut, UserProfileUpdate, WalletUpdate, VerificationSubmission, UserDetailedOut, UserDashboardAnalytics
 from dependencies.auth import get_current_active_user
-from crud.user import get_user_by_id_with_request, update_user_profile_basic, upload_user_avatar, update_wallet_balance, submit_verification_documents, get_verification_status
+from crud.user import (
+    get_user_by_id_with_request, update_user_profile_basic, upload_user_avatar, 
+    update_wallet_balance, submit_verification_documents, get_verification_status,
+    get_detailed_user_profile, get_user_dashboard_analytics
+)
 from utils.file_upload import upload_image_file, upload_document_file
 import logging
 
@@ -71,55 +75,16 @@ async def upload_user_avatar_endpoint(
         )
 
 
-@router.get("/dashboard-stats")
-async def get_dashboard_stats(
+@router.get("/dashboard-analytics", response_model=UserDashboardAnalytics)
+async def get_dashboard_analytics(
     request: Request,
     current_user = Depends(get_current_active_user)
 ):
-    """Get dashboard statistics for current user"""
-    try:
-        database = request.app.mongodb
-        user_id = current_user["id"]
-        
-        # Get user's pet listings count
-        pets_count = await database.pets.count_documents({"owner_id": user_id})
-        active_pets_count = await database.pets.count_documents({
-            "owner_id": user_id, 
-            "status": "active"
-        })
-        
-        # Get total views across all user's pets
-        pipeline = [
-            {"$match": {"owner_id": user_id}},
-            {"$group": {"_id": None, "total_views": {"$sum": "$view_count"}}}
-        ]
-        total_views_result = await database.pets.aggregate(pipeline).to_list(1)
-        total_views = total_views_result[0]["total_views"] if total_views_result else 0
-        
-        # Get total favorites across all user's pets  
-        pipeline = [
-            {"$match": {"owner_id": user_id}},
-            {"$group": {"_id": None, "total_favorites": {"$sum": "$favorite_count"}}}
-        ]
-        total_favorites_result = await database.pets.aggregate(pipeline).to_list(1)
-        total_favorites = total_favorites_result[0]["total_favorites"] if total_favorites_result else 0
-        
-        return {
-            "total_pets": pets_count,
-            "active_pets": active_pets_count,
-            "total_views": total_views,
-            "total_favorites": total_favorites,
-            "total_earnings": 0.0,  # TODO: Implement when transactions are added
-            "pending_bookings": 0,  # TODO: Implement when bookings are added
-            "recent_activity_count": 0  # TODO: Implement activity tracking
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting dashboard stats: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get dashboard statistics"
-        )
+    """Get detailed dashboard analytics for current user"""
+    user_id = current_user["id"]
+    analytics = await get_user_dashboard_analytics(user_id, request)
+    
+    return analytics
 
 
 @router.get("/verification-status")
@@ -153,31 +118,45 @@ async def get_wallet_balance(
     }
 
 
-@router.get("/{user_id}", response_model=UserOut)
-async def get_public_user_profile(
-    user_id: str,
-    request: Request
+@router.get("/profile/detailed", response_model=UserDetailedOut)
+async def get_detailed_profile(
+    request: Request,
+    current_user = Depends(get_current_active_user)
 ):
-    """Get public user profile"""
-    user = await get_user_by_id_with_request(user_id, request)
+    """Get detailed profile with stats for current user"""
+    user_id = current_user["id"]
+    detailed_profile = await get_detailed_user_profile(user_id, request)
     
-    if not user:
+    if not detailed_profile:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
     
-    # Return only public information
-    public_user = {
-        "id": user["id"],
-        "name": user["name"],
-        "avatar_url": user.get("avatar_url"),
-        "created_at": user["created_at"],
-        "verification_status": user.get("verification_status", "unverified"),
-        # Don't include sensitive information like email, wallet_balance, etc.
-    }
+    return detailed_profile
+
+
+@router.get("/{user_id}/profile", response_model=UserDetailedOut)
+async def get_user_detailed_profile(
+    user_id: str,
+    request: Request
+):
+    """Get detailed public profile for any user"""
+    detailed_profile = await get_detailed_user_profile(user_id, request)
     
-    return public_user
+    if not detailed_profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Remove sensitive information for public profiles
+    if "email" in detailed_profile:
+        del detailed_profile["email"]
+    if "wallet_balance" in detailed_profile:
+        del detailed_profile["wallet_balance"]
+        
+    return detailed_profile
 
 
 @router.put("/wallet", response_model=Dict[str, Any])

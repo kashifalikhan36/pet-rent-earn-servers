@@ -359,3 +359,130 @@ async def get_nearby_pets(latitude: float, longitude: float, radius_km: int, req
     
     pets = await PetModel.search_pets(filters, database, 0, limit)
     return add_photo_base_urls(pets) 
+
+async def create_pet_review(pet_id: str, review_data: dict, user_id: str, user_name: str, user_avatar: str, request: Request) -> Optional[Dict[str, Any]]:
+    """Create a review for a pet"""
+    try:
+        database = request.app.mongodb
+        from bson import ObjectId
+        
+        # Check if pet exists
+        pet = await PetModel.get_pet_by_id(pet_id, database)
+        if not pet:
+            return None
+            
+        # Check if user already reviewed this pet
+        existing_review = await database.pet_reviews.find_one({
+            "pet_id": pet_id,
+            "reviewer_id": user_id
+        })
+        
+        if existing_review:
+            # Update existing review
+            now = datetime.utcnow()
+            await database.pet_reviews.update_one(
+                {"_id": existing_review["_id"]},
+                {
+                    "$set": {
+                        "rating": review_data["rating"],
+                        "comment": review_data["comment"],
+                        "updated_at": now
+                    }
+                }
+            )
+            
+            # Get the updated review
+            review = await database.pet_reviews.find_one({"_id": existing_review["_id"]})
+            if review:
+                review["id"] = str(review["_id"])
+                del review["_id"]
+            
+            # Update pet average rating
+            await update_pet_average_rating(pet_id, database)
+            
+            return review
+        
+        # Create new review
+        now = datetime.utcnow()
+        review_doc = {
+            "pet_id": pet_id,
+            "reviewer_id": user_id,
+            "reviewer_name": user_name,
+            "reviewer_avatar": user_avatar,
+            "rating": review_data["rating"],
+            "comment": review_data["comment"],
+            "created_at": now,
+            "updated_at": None
+        }
+        
+        result = await database.pet_reviews.insert_one(review_doc)
+        
+        # Get the created review
+        review = await database.pet_reviews.find_one({"_id": result.inserted_id})
+        if review:
+            review["id"] = str(review["_id"])
+            del review["_id"]
+        
+        # Update pet average rating
+        await update_pet_average_rating(pet_id, database)
+        
+        return review
+        
+    except Exception as e:
+        print(f"Error creating pet review: {str(e)}")
+        return None
+
+
+async def get_pet_reviews(pet_id: str, request: Request, skip: int = 0, limit: int = 10) -> List[Dict[str, Any]]:
+    """Get all reviews for a pet"""
+    try:
+        database = request.app.mongodb
+        
+        # Check if pet exists
+        pet = await PetModel.get_pet_by_id(pet_id, database)
+        if not pet:
+            return []
+            
+        cursor = database.pet_reviews.find({"pet_id": pet_id}).sort("created_at", -1).skip(skip).limit(limit)
+        
+        reviews = []
+        async for review in cursor:
+            review["id"] = str(review["_id"])
+            del review["_id"]
+            reviews.append(review)
+            
+        return reviews
+        
+    except Exception as e:
+        print(f"Error getting pet reviews: {str(e)}")
+        return []
+
+
+async def update_pet_average_rating(pet_id: str, database) -> None:
+    """Update the average rating of a pet"""
+    try:
+        from bson import ObjectId
+        
+        pipeline = [
+            {"$match": {"pet_id": pet_id}},
+            {"$group": {"_id": None, "avg_rating": {"$avg": "$rating"}, "count": {"$sum": 1}}}
+        ]
+        
+        result = await database.pet_reviews.aggregate(pipeline).to_list(1)
+        
+        if result:
+            avg_rating = result[0]["avg_rating"]
+            count = result[0]["count"]
+            
+            await database.pets.update_one(
+                {"_id": ObjectId(pet_id)},
+                {
+                    "$set": {
+                        "average_rating": avg_rating,
+                        "review_count": count
+                    }
+                }
+            )
+    except Exception as e:
+        print(f"Error updating pet average rating: {str(e)}")
+        return None 
