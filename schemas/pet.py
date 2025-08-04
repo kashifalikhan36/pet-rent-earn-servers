@@ -57,7 +57,7 @@ class PetCreate(BaseModel):
     location: LocationSchema
     
     # Pet characteristics
-    size: Optional[str] = Field(None, regex="^(tiny|small|medium|large|giant)$")
+    size: Optional[str] = Field(None, pattern="^(tiny|small|medium|large|giant)$")
     weight: Optional[float] = Field(None, ge=0, le=200)
     color: Optional[str] = Field(None, max_length=100)
     
@@ -67,7 +67,7 @@ class PetCreate(BaseModel):
     house_trained: bool = True
     good_with_kids: bool = True
     good_with_pets: bool = True
-    energy_level: Optional[str] = Field(None, regex="^(low|medium|high)$")
+    energy_level: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     
     # Requirements
     special_requirements: Optional[str] = Field(None, max_length=500)
@@ -92,7 +92,7 @@ class PetUpdate(BaseModel):
     status: Optional[PetStatus] = None
     
     # Pet characteristics
-    size: Optional[str] = Field(None, regex="^(tiny|small|medium|large|giant)$")
+    size: Optional[str] = Field(None, pattern="^(tiny|small|medium|large|giant)$")
     weight: Optional[float] = Field(None, ge=0, le=200)
     color: Optional[str] = Field(None, max_length=100)
     
@@ -102,7 +102,7 @@ class PetUpdate(BaseModel):
     house_trained: Optional[bool] = None
     good_with_kids: Optional[bool] = None
     good_with_pets: Optional[bool] = None
-    energy_level: Optional[str] = Field(None, regex="^(low|medium|high)$")
+    energy_level: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     
     # Requirements
     special_requirements: Optional[str] = Field(None, max_length=500)
@@ -170,12 +170,12 @@ class PetSearchFilters(BaseModel):
     age_max: Optional[int] = Field(None, ge=0)
     price_min: Optional[float] = Field(None, ge=0)
     price_max: Optional[float] = Field(None, ge=0)
-    size: Optional[str] = Field(None, regex="^(tiny|small|medium|large|giant)$")
+    size: Optional[str] = Field(None, pattern="^(tiny|small|medium|large|giant)$")
     location: Optional[Dict[str, Any]] = None
     radius: Optional[int] = Field(None, ge=1, le=100)  # km
     good_with_kids: Optional[bool] = None
     good_with_pets: Optional[bool] = None
-    energy_level: Optional[str] = Field(None, regex="^(low|medium|high)$")
+    energy_level: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     available_from: Optional[datetime] = None
     available_until: Optional[datetime] = None
 

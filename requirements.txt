@@ -1,27 +1,25 @@
 # Web Framework
 fastapi
-uvicorn
+uvicorn[standard]
 
 # MongoDB
 motor
 
-# Authentication
-python-jose
-passlib
+# Authentication & Security
+python-jose[cryptography]
+passlib[bcrypt]
 bcrypt
-python-multipart  # For OAuth2 form handling and file uploads
+python-multipart
 
-# System monitoring
-psutil
-
-# Data Validation
+# Data Validation & Settings
 pydantic
-email-validator  # Required for pydantic[email]
+pydantic_settings
+email-validator
 
 # HTTP Client
 httpx
 
-# Google OAuth and Maps
+# Google OAuth
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
@@ -29,31 +27,20 @@ google-auth-httplib2
 # Environment Variables
 python-dotenv
 
-# Utilities and Date/Time
-pytz
-python-dateutil
-
 # Email Templates
 Jinja2
 
-# File handling
-python-magic  # For file type detection
-Pillow  # For image processing
+# File Handling
+python-magic-bin
+Pillow
 
-# Payment processing
-stripe
-paypalrestsdk
+# Optional: Payment processing (for future use)
+# stripe
+# paypalrestsdk
 
-# Push notifications
-pyfcm
+# Optional: Push notifications (for future use)  
+# pyfcm
 
-# Rate limiting
-slowapi
-redis  # For rate limiting backend
-
-# Additional utilities
-uuid
-qrcode  # For generating QR codes
-geopy  # For location services
-
-pydantic_settings==2.9.1
+# Optional: Rate limiting with Redis (for future use)
+# slowapi
+# redis
