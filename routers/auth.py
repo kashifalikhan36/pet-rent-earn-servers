@@ -66,25 +66,63 @@ async def register(user_in: UserCreate, request: Request):
 
 
 @router.post("/login", response_model=Token)
-async def login(
-    request: Request,
-    form_data: OAuth2PasswordRequestForm = Depends()
-):
+async def login(request: Request):
     """
-    Authenticate a user and return an access token.
+    Unified login endpoint that accepts both JSON and form data.
+    
+    JSON format: {"email": "user@example.com", "password": "password"}
+    Form format: username=user@example.com&password=password
     """
-    logger.debug(f"Login attempt for username: {form_data.username}")
-    
-    # Get client IP address and user agent for analytics
-    client_ip = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent", "")
-    
     try:
+        # Get content type
+        content_type = request.headers.get("content-type", "")
+        
+        email = None
+        password = None
+        
+        if "application/json" in content_type:
+            # Handle JSON request
+            body = await request.json()
+            email = body.get("email")
+            password = body.get("password")
+            
+            if not email or not password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email and password are required for JSON login"
+                )
+                
+            logger.debug(f"JSON login attempt for email: {email}")
+            
+        elif "application/x-www-form-urlencoded" in content_type:
+            # Handle form data
+            form = await request.form()
+            email = form.get("username") or form.get("email")  # Support both fields
+            password = form.get("password")
+            
+            if not email or not password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Username/email and password are required for form login"
+                )
+                
+            logger.debug(f"Form login attempt for email: {email}")
+            
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Content-Type must be application/json or application/x-www-form-urlencoded"
+            )
+        
+        # Get client IP address and user agent for analytics
+        client_ip = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent", "")
+        
         # Authenticate user
-        user = await authenticate_user(form_data.username, form_data.password)
+        user = await authenticate_user(email, password)
         
         if not user:
-            logger.warning(f"Authentication failed for username: {form_data.username}")
+            logger.warning(f"Authentication failed for email: {email}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
@@ -112,54 +150,6 @@ async def login(
         )
 
 
-@router.post("/login-json", response_model=Token)
-async def login_json(
-    request: Request,
-    user_data: UserLogin
-):
-    """
-    Authenticate a user using JSON data and return an access token.
-    Alternative endpoint for clients that prefer JSON over form data.
-    """
-    logger.debug(f"JSON login attempt for email: {user_data.email}")
-    
-    # Get client IP address and user agent for analytics
-    client_ip = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent", "")
-    
-    try:
-        # Authenticate user
-        user = await authenticate_user(user_data.email, user_data.password)
-        
-        if not user:
-            logger.warning(f"Authentication failed for email: {user_data.email}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        logger.info(f"Authentication successful for user: {user['email']}")
-        
-        # Create access token
-        token_data = {"sub": user["id"], "role": user["role"]}
-        token = create_access_token(
-            token_data,
-            expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
-        )
-        
-        return Token(access_token=token, token_type="bearer")
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"JSON login error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Login failed"
-        )
-
-
 @router.post("/logout")
 async def logout():
     """
@@ -177,8 +167,8 @@ async def refresh_token(current_user = Depends(get_current_active_user)):
     token_data = {"sub": current_user["id"], "role": current_user["role"]}
     token = create_access_token(
         token_data,
-            expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
-        )
+        expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
+    )
         
     return Token(access_token=token, token_type="bearer")
 
@@ -407,63 +397,7 @@ async def verify_reset_token(token: str):
             
     except Exception as e:
         logger.error(f"Token verification failed: {str(e)}")
-    return {
+        return {
             "valid": False,
             "message": "Failed to verify token"
-    }
-
-
-@router.get("/debug/test-auth")
-async def debug_test_auth():
-    """
-    Debug endpoint to test authentication system.
-    Should be removed in production.
-    """
-    try:
-        from core.config import get_settings
-        settings = get_settings()
-        
-        return {
-            "status": "Auth system operational",
-            "jwt_configured": bool(settings.JWT_SECRET_KEY),
-            "mongodb_configured": bool(settings.MONGODB_URI),
-            "endpoints": {
-                "login_form": "/api/auth/login (form data: username, password)",
-                "login_json": "/api/auth/login-json (JSON: email, password)",
-                "register": "/api/auth/register (JSON: name, email, password)"
-            },
-            "expected_formats": {
-                "login_form": "Content-Type: application/x-www-form-urlencoded",
-                "login_json": "Content-Type: application/json",
-                "register": "Content-Type: application/json"
-            }
         }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@router.post("/debug/create-test-user")
-async def debug_create_test_user():
-    """
-    Debug endpoint to create a test user.
-    Should be removed in production.
-    """
-    try:
-        from schemas.user import UserCreate
-        test_user = UserCreate(
-            name="Test User",
-            email="test@example.com",
-            password="testpassword123"
-        )
-        
-        user = await create_user(test_user)
-        if user:
-            return {
-                "status": "Test user created successfully",
-                "user_id": user["id"],
-                "email": user["email"]
-            }
-        else:
-            return {"status": "User already exists or creation failed"}
-    except Exception as e:
-        return {"error": str(e)}

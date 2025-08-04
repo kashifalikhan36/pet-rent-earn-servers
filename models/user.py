@@ -5,12 +5,16 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient
 from core.config import get_settings
 import secrets
+import urllib.parse
 
 settings = get_settings()
 
 # Create MongoDB client
 client = AsyncIOMotorClient(settings.MONGODB_URI)
-db = client.pet_rent_earn_db
+# Extract database name from URI, fallback to 'petrent' if not specified
+parsed_uri = urllib.parse.urlparse(settings.MONGODB_URI)
+db_name = parsed_uri.path.lstrip('/') if parsed_uri.path and parsed_uri.path != '/' else 'petrent'
+db = client[db_name]
 users_collection = db.users
 
 

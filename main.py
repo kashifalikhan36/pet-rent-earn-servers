@@ -35,7 +35,12 @@ if not os.path.exists(settings.UPLOAD_DIRECTORY):
 async def lifespan(app: FastAPI):
     # Startup
     app.mongodb_client = AsyncIOMotorClient(settings.MONGODB_URI)
-    app.mongodb = app.mongodb_client.pet_rent_earn_db
+    
+    # Extract database name from URI, fallback to 'petrent' if not specified
+    import urllib.parse
+    parsed_uri = urllib.parse.urlparse(settings.MONGODB_URI)
+    db_name = parsed_uri.path.lstrip('/') if parsed_uri.path and parsed_uri.path != '/' else 'petrent'
+    app.mongodb = app.mongodb_client[db_name]
     
     # Create indexes
     await create_database_indexes(app.mongodb)
