@@ -18,7 +18,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/pets/{pet_id}", response_model=HealthRecordOut)
+@router.post("/by-pet/{pet_id}", response_model=HealthRecordOut)
 async def create_health_record_endpoint(
     pet_id: str,
     record: HealthRecordCreate,
@@ -128,7 +128,7 @@ async def get_health_record_endpoint(
     return record
 
 
-@router.get("/pets/{pet_id}", response_model=List[HealthRecordOut])
+@router.get("/by-pet/{pet_id}", response_model=List[HealthRecordOut])
 async def get_pet_health_records_endpoint(
     pet_id: str,
     record_type: Optional[RecordType] = None,
@@ -204,8 +204,8 @@ async def get_recent_health_activity(
 @router.post("/{record_id}/attachments", response_model=Dict[str, Any])
 async def upload_attachment(
     record_id: str,
+    request: Request,
     file: UploadFile = File(...),
-    request: Request = None,
     current_user = Depends(get_current_active_user)
 ):
     """Upload attachment for health record"""

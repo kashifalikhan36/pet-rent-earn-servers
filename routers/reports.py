@@ -184,8 +184,8 @@ async def get_report(
 
 @router.post("/evidence", response_model=Dict[str, Any])
 async def upload_report_evidence(
+    request: Request,
     files: List[UploadFile] = File(...),
-    request: Request = None,
     current_user = Depends(get_current_active_user)
 ):
     """Upload evidence images for a report"""
