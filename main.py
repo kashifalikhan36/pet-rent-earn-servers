@@ -124,6 +124,13 @@ async def create_database_indexes(database):
     await database.reminders.create_index("pet_id")
     await database.reminders.create_index("reminder_date")
     await database.reminders.create_index("health_record_id", sparse=True)
+    
+    # Payouts indexes
+    await database.payouts.create_index("user_id")
+    await database.payouts.create_index("status")
+    await database.payouts.create_index("requested_at")
+    await database.payouts.create_index([("user_id", 1), ("status", 1)])
+    await database.payouts.create_index("method")
 
 # Create FastAPI app
 app = FastAPI(
