@@ -1,5 +1,5 @@
-from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Form
+from typing import Optional, Dict, Any, List
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Form, Query
 from fastapi.responses import JSONResponse
 
 from schemas.user import UserOut, UserProfileUpdate, WalletUpdate, VerificationSubmission, UserDetailedOut, UserDashboardAnalytics
