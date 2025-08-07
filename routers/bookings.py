@@ -37,6 +37,35 @@ async def create_booking_endpoint(
     return booking
 
 
+@router.get("/my-bookings", response_model=List[BookingSummary])
+async def get_my_bookings_endpoint(
+    request: Request,
+    type: Optional[str] = Query(None, description="Filter by 'as_owner' or 'as_renter'"),
+    status: Optional[str] = Query(None, description="Filter by booking status"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=50),
+    current_user = Depends(get_current_active_user)
+):
+    """Get list of user's bookings - frontend compatible endpoint"""
+    # Convert frontend 'type' parameter to backend 'as_owner' parameter
+    as_owner = None
+    if type == "as_owner":
+        as_owner = True
+    elif type == "as_renter":
+        as_owner = False
+    
+    bookings, total = await get_user_bookings(
+        user_id=current_user["id"],
+        request=request,
+        as_owner=as_owner,
+        status=status,
+        page=page,
+        limit=per_page
+    )
+    
+    return bookings
+
+
 @router.get("", response_model=List[BookingSummary])
 async def get_user_bookings_endpoint(
     request: Request,
@@ -46,7 +75,7 @@ async def get_user_bookings_endpoint(
     per_page: int = Query(20, ge=1, le=50),
     current_user = Depends(get_current_active_user)
 ):
-    """Get list of user's bookings"""
+    """Get list of user's bookings - legacy endpoint"""
     bookings, _ = await get_user_bookings(
         user_id=current_user["id"],
         request=request,
