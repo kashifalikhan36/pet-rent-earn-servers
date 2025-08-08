@@ -2,7 +2,17 @@
 .env
 .env.local
 .env.production
-
+.env.development
+.env.staging
+.env.test
+.env.production
+.env.development
+.env.staging
+.env.test
+.env.production
+.env.development
+.env.staging
+.env.test
 # Python
 __pycache__/
 *.py[cod]

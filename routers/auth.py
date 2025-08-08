@@ -1,9 +1,9 @@
 from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 
-from schemas.user import UserCreate, UserOut, GoogleOAuthCallback, GoogleAuthResponse, ForgotPasswordRequest, ResetPasswordRequest, PasswordResetResponse, EmailCheckResponse, UserLogin
+from schemas.user import UserCreate, UserOut, GoogleOAuthCallback, GoogleAuthResponse, ForgotPasswordRequest, ResetPasswordRequest, PasswordResetResponse, EmailCheckResponse, UserLogin, GoogleUserInfo
 from schemas.token import Token
 from crud.user import create_user, authenticate_user, create_google_user, request_password_reset, reset_password_with_token, get_user_by_reset_token
 from core.security import create_access_token
@@ -247,7 +247,7 @@ async def get_current_user(current_user = Depends(get_current_active_user)):
     return current_user
 
 
-# Keep Google OAuth functionality for convenience
+# GOOGLE OAUTH ENDPOINTS
 @router.get("/google", response_model=GoogleAuthResponse)
 async def google_auth():
     """
@@ -276,13 +276,103 @@ async def google_auth():
         )
 
 
+@router.post("/google/login", response_model=Token)
+async def google_login(
+    callback_data: GoogleOAuthCallback,
+    request: Request
+):
+    """
+    Professional Google OAuth login endpoint that returns JWT token directly.
+    Use this for API clients that want a JSON response instead of redirect.
+    """
+    try:
+        # Check if Google OAuth is configured
+        if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Google OAuth is not configured"
+            )
+        
+        # Check if authorization code was already used
+        if is_code_used(callback_data.code):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Authorization code has already been used"
+            )
+        
+        logger.info(f"Google login received code: {callback_data.code[:20]}...")
+        
+        # Exchange code for tokens
+        from utils.google_oauth import GoogleOAuth
+        token_data = await GoogleOAuth.exchange_code_for_token(callback_data.code)
+        if not token_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to exchange code for token"
+            )
+        
+        # Get user info from ID token
+        user_info = None
+        if "id_token" in token_data:
+            user_info = await GoogleOAuth.get_user_info_from_token(token_data["id_token"])
+        
+        # If ID token failed, try access token
+        if not user_info and "access_token" in token_data:
+            user_info = await GoogleOAuth.get_user_info_from_access_token(token_data["access_token"])
+        
+        if not user_info:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to get user information from Google"
+            )
+        
+        logger.info(f"Google login user info: {user_info['email']}")
+        
+        # Create or get user
+        user = await create_google_user(
+            name=user_info["name"],
+            email=user_info["email"],
+            google_id=user_info["id"],
+            profile_picture=user_info.get("picture")
+        )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create or retrieve user"
+            )
+        
+        # Create JWT token
+        token_payload = {"sub": user["id"], "role": user["role"]}
+        access_token = create_access_token(
+            token_payload,
+            expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
+        )
+        
+        return Token(access_token=access_token, token_type="bearer")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_msg = f"Google login error: {str(e)}"
+        logger.error(error_msg)
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Google authentication failed: {str(e)}"
+        )
+
+
 @router.get("/google/callback")
 async def google_callback(
     code: str = Query(..., description="Authorization code from Google"),
     request: Request = None
 ):
     """
-    Handle Google OAuth callback and create/login user.
+    Handle Google OAuth callback and redirect to frontend.
+    Use this for web applications that need redirect-based flow.
     """
     # Get client IP address and user agent for analytics
     client_ip = request.client.host if request.client else None
@@ -292,15 +382,12 @@ async def google_callback(
         # Check if Google OAuth is configured
         if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
             logger.error("Google OAuth not configured - missing credentials")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Google OAuth is not configured"
-            )
+            error_url = f"{settings.FRONTEND_URL}/auth/error?message=oauth_not_configured"
+            return RedirectResponse(url=error_url)
         
         # Check if authorization code was already used
         if is_code_used(code):
             logger.warning(f"Authorization code already used in callback: {code[:20]}...")
-            # Redirect to frontend with error
             error_url = f"{settings.FRONTEND_URL}/auth/error?message=code_already_used"
             return RedirectResponse(url=error_url)
         
@@ -311,10 +398,8 @@ async def google_callback(
         token_data = await GoogleOAuth.exchange_code_for_token(code)
         if not token_data:
             logger.error("Token exchange failed in callback")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to exchange code for token"
-            )
+            error_url = f"{settings.FRONTEND_URL}/auth/error?message=token_exchange_failed"
+            return RedirectResponse(url=error_url)
         
         logger.info(f"Callback token exchange successful: {list(token_data.keys())}")
         
@@ -329,10 +414,8 @@ async def google_callback(
         
         if not user_info:
             logger.error("Failed to get user info in callback")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to get user information from Google"
-            )
+            error_url = f"{settings.FRONTEND_URL}/auth/error?message=user_info_failed"
+            return RedirectResponse(url=error_url)
         
         logger.info(f"Callback user info: {user_info['email']}")
         
@@ -346,10 +429,8 @@ async def google_callback(
         
         if not user:
             logger.error(f"Failed to create user in callback: {user_info['email']}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create user"
-        )
+            error_url = f"{settings.FRONTEND_URL}/auth/error?message=user_creation_failed"
+            return RedirectResponse(url=error_url)
         
         # Create JWT token
         token_payload = {"sub": user["id"], "role": user["role"]}
@@ -363,17 +444,43 @@ async def google_callback(
         logger.info(f"Redirecting to: {redirect_url}")
         return RedirectResponse(url=redirect_url)
         
-    except HTTPException:
-        raise
     except Exception as e:
         import traceback
         error_msg = f"Callback error: {str(e)}"
         logger.error(error_msg)
         logger.error(f"Traceback: {traceback.format_exc()}")
         
+        error_url = f"{settings.FRONTEND_URL}/auth/error?message=authentication_failed"
+        return RedirectResponse(url=error_url)
+
+
+@router.get("/google/user-info", response_model=GoogleUserInfo)
+async def get_google_user_info(
+    access_token: str = Query(..., description="Google access token")
+):
+    """
+    Get Google user information using access token.
+    This endpoint can be used to verify Google tokens or get user info.
+    """
+    try:
+        from utils.google_oauth import GoogleOAuth
+        user_info = await GoogleOAuth.get_user_info_from_access_token(access_token)
+        
+        if not user_info:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired Google access token"
+            )
+        
+        return GoogleUserInfo(**user_info)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting Google user info: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Authentication failed: {str(e)}"
+            detail="Failed to get user information from Google"
         )
 
 

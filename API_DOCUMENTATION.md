@@ -66,15 +66,76 @@ const loginUser = async (credentials: { email: string; password: string }) => {
 }
 ```
 
-### 3. Google OAuth Login
-**POST** `/api/auth/google`
-Authenticates a user using Google OAuth ID token.
+### 3. Google OAuth Authentication ⭐ UPDATED
+
+#### 3a. Get Google Auth URL
+**GET** `/api/auth/google`
+Get the Google OAuth authorization URL to redirect users for authentication.
 
 ```typescript
-const googleLogin = async (idToken: string) => {
-  const response = await axios.post('https://api.cvflow.tech/api/auth/google', { id_token: idToken });
+const getGoogleAuthUrl = async () => {
+  const response = await axios.get('https://api.cvflow.tech/api/auth/google');
+  // Redirect user to the auth_url
+  window.location.href = response.data.auth_url;
   return response.data;
 };
+```
+
+**Response (200):**
+```json
+{
+  "auth_url": "https://accounts.google.com/o/oauth2/auth?client_id=..."
+}
+```
+
+#### 3b. Google Login (API Response) ⭐ NEW
+**POST** `/api/auth/google/login`
+Professional endpoint that returns JWT token directly (no redirect). Use this for API clients.
+
+```typescript
+const googleLogin = async (authCode: string) => {
+  const response = await axios.post('https://api.cvflow.tech/api/auth/google/login', {
+    code: authCode
+  });
+  
+  // Store the JWT token
+  localStorage.setItem('authToken', response.data.access_token);
+  return response.data;
+};
+```
+
+**Response (200):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+#### 3c. Google Callback (Redirect Flow)
+**GET** `/api/auth/google/callback?code=...`
+Handles the redirect from Google OAuth (for web applications). Automatically redirects to frontend with token.
+
+#### 3d. Get Google User Info ⭐ NEW
+**GET** `/api/auth/google/user-info?access_token=...`
+Get user information from Google access token for verification purposes.
+
+```typescript
+const getGoogleUserInfo = async (googleAccessToken: string) => {
+  const response = await axios.get(`https://api.cvflow.tech/api/auth/google/user-info?access_token=${googleAccessToken}`);
+  return response.data;
+};
+```
+
+**Response (200):**
+```json
+{
+  "id": "1234567890",
+  "email": "user@gmail.com", 
+  "name": "John Doe",
+  "picture": "https://lh3.googleusercontent.com/...",
+  "email_verified": true
+}
 ```
 
 ### 4. Logout User
