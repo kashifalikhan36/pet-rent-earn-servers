@@ -9,6 +9,13 @@ from crud.notification import (
     get_notification_settings, update_notification_settings
 )
 import logging
+from schemas.notification import (
+    NotificationFeedPage, NotificationFeedItem, NotificationReadRequest,
+    NotificationSettingsV2, NotificationSettingsV2Update,
+)
+from crud.notification import (
+    get_notification_settings_v2, update_notification_settings_v2, mark_notifications_as_read_by_ids,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -33,6 +40,34 @@ async def get_all_notifications(
     )
     
     return notifications
+
+
+# V2: feed with items + next_page
+@router.get("/feed", response_model=NotificationFeedPage)
+async def get_notifications_feed(
+    request: Request,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    unread_only: bool = Query(False),
+    current_user = Depends(get_current_active_user)
+):
+    skip = (page - 1) * per_page
+    raw = await get_user_notifications(
+        user_id=current_user["id"], request=request, unread_only=unread_only, skip=skip, limit=per_page + 1
+    )
+    items: List[NotificationFeedItem] = []
+    for n in raw[:per_page]:
+        items.append(NotificationFeedItem(
+            id=n["id"],
+            type=str(n.get("type")),
+            title=n.get("title", ""),
+            body=n.get("message", ""),
+            read=bool(n.get("is_read", False)),
+            created_at=n.get("created_at"),
+            data=n.get("data"),
+        ))
+    next_page = page + 1 if len(raw) > per_page else None
+    return NotificationFeedPage(items=items, next_page=next_page)
 
 
 @router.get("/unread", response_model=List[NotificationOut])
@@ -88,6 +123,21 @@ async def mark_as_read(
         )
     
     return {"message": "Notification marked as read"}
+
+
+# V2: POST /read with ids or mark all
+@router.post("/read", response_model=Dict[str, Any])
+async def mark_selected_or_all_as_read(
+    payload: NotificationReadRequest,
+    request: Request,
+    current_user = Depends(get_current_active_user)
+):
+    user_id = current_user["id"]
+    if payload and payload.ids:
+        modified = await mark_notifications_as_read_by_ids(user_id, payload.ids, request)
+        return {"message": "Selected notifications marked as read", "count": modified}
+    count = await mark_all_notifications_as_read(user_id, request)
+    return {"message": "All notifications marked as read", "count": count}
 
 
 @router.put("/read-all", response_model=Dict[str, Any])
@@ -166,4 +216,24 @@ async def update_notification_settings_endpoint(
             detail="Failed to update notification settings"
         )
     
-    return updated_settings 
+    return updated_settings
+
+
+# V2: nested channel-based settings
+@router.get("/settings/v2", response_model=NotificationSettingsV2)
+async def get_notification_settings_v2_endpoint(
+    request: Request,
+    current_user = Depends(get_current_active_user)
+):
+    settings = await get_notification_settings_v2(current_user["id"], request)
+    return NotificationSettingsV2(**settings)
+
+
+@router.patch("/settings", response_model=NotificationSettingsV2)
+async def patch_notification_settings_v2_endpoint(
+    payload: NotificationSettingsV2Update,
+    request: Request,
+    current_user = Depends(get_current_active_user)
+):
+    updated = await update_notification_settings_v2(current_user["id"], payload.dict(exclude_unset=True), request)
+    return NotificationSettingsV2(**updated)

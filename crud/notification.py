@@ -164,7 +164,7 @@ async def get_notification_settings(
     user_id: str,
     request: Request
 ) -> Dict[str, Any]:
-    """Get user notification settings"""
+    """Get user notification settings (legacy flat structure)"""
     database = request.app.mongodb
     
     settings = await database.notification_settings.find_one({
@@ -202,7 +202,7 @@ async def update_notification_settings(
     settings_data: Dict[str, Any],
     request: Request
 ) -> Dict[str, Any]:
-    """Update user notification settings"""
+    """Update user notification settings (legacy flat structure)"""
     database = request.app.mongodb
     
     # Remove None values
@@ -261,4 +261,63 @@ async def create_system_notification(
         "data": data
     }
     
-    return await create_notification(notification_data, request) 
+    return await create_notification(notification_data, request)
+
+
+# ------------------ V2 helpers for new API spec ------------------
+async def get_notification_settings_v2(user_id: str, request: Request) -> Dict[str, Any]:
+    """Get nested channel-based notification settings. Creates defaults if missing."""
+    db = request.app.mongodb
+    doc = await db.notification_settings.find_one({"user_id": user_id})
+    if not doc or ("email" not in doc and "push" not in doc and "in_app" not in doc):
+        # Seed defaults for v2
+        v2_defaults = {
+            "email": {"marketing": False, "product": True, "security": True},
+            "push": {"messages": True, "offers": True, "bookings": True},
+            "in_app": {"messages": True, "offers": True, "system": True},
+        }
+        base = {"user_id": user_id, **v2_defaults, "updated_at": datetime.utcnow()}
+        if not doc:
+            base["created_at"] = datetime.utcnow()
+        await db.notification_settings.update_one({"user_id": user_id}, {"$set": base}, upsert=True)
+        return v2_defaults
+    # Build response only with nested keys
+    return {
+        "email": doc.get("email", {"marketing": False, "product": True, "security": True}),
+        "push": doc.get("push", {"messages": True, "offers": True, "bookings": True}),
+        "in_app": doc.get("in_app", {"messages": True, "offers": True, "system": True}),
+    }
+
+
+async def update_notification_settings_v2(user_id: str, update: Dict[str, Any], request: Request) -> Dict[str, Any]:
+    """Patch nested settings. Accepts partial payload like {"email": {"marketing": true}}"""
+    db = request.app.mongodb
+    # Flatten nested update to $set paths
+    set_ops: Dict[str, Any] = {"updated_at": datetime.utcnow()}
+    for channel in ("email", "push", "in_app"):
+        if channel in update and isinstance(update[channel], dict):
+            for k, v in update[channel].items():
+                set_ops[f"{channel}.{k}"] = v
+    if len(set_ops) == 1:  # only updated_at
+        # nothing to update, just return current
+        return await get_notification_settings_v2(user_id, request)
+    await db.notification_settings.update_one({"user_id": user_id}, {"$set": set_ops, "$setOnInsert": {"user_id": user_id, "created_at": datetime.utcnow()}}, upsert=True)
+    return await get_notification_settings_v2(user_id, request)
+
+
+async def mark_notifications_as_read_by_ids(user_id: str, ids: List[str], request: Request) -> int:
+    """Mark selected notifications as read. Returns number modified."""
+    db = request.app.mongodb
+    object_ids = []
+    for _id in ids:
+        try:
+            object_ids.append(ObjectId(_id))
+        except Exception:
+            continue
+    if not object_ids:
+        return 0
+    res = await db.notifications.update_many(
+        {"_id": {"$in": object_ids}, "recipient_id": user_id, "is_read": False},
+        {"$set": {"is_read": True, "read_at": datetime.utcnow()}}
+    )
+    return res.modified_count

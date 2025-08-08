@@ -43,16 +43,13 @@ const registerUser = async (userData: {
 
 ### 2. Login User
 **POST** `/api/auth/login`
-Authenticates a user with email and password.
+Authenticates a user with email and password (JSON or form-data supported).
 
 ```typescript
 const loginUser = async (credentials: { email: string; password: string }) => {
-  const formData = new FormData();
-  formData.append('username', credentials.email);
-  formData.append('password', credentials.password);
-  
-  const response = await axios.post('https://api.cvflow.tech/api/auth/login', formData);
-  return response.data;
+  // JSON format supported
+  const { data } = await axios.post('https://api.cvflow.tech/api/auth/login', credentials);
+  return data;
 };
 ```
 
@@ -75,7 +72,6 @@ Get the Google OAuth authorization URL to redirect users for authentication.
 ```typescript
 const getGoogleAuthUrl = async () => {
   const response = await axios.get('https://api.cvflow.tech/api/auth/google');
-  // Redirect user to the auth_url
   window.location.href = response.data.auth_url;
   return response.data;
 };
@@ -83,33 +79,19 @@ const getGoogleAuthUrl = async () => {
 
 **Response (200):**
 ```json
-{
-  "auth_url": "https://accounts.google.com/o/oauth2/auth?client_id=..."
-}
+{ "auth_url": "https://accounts.google.com/o/oauth2/auth?client_id=..." }
 ```
 
 #### 3b. Google Login (API Response) ⭐ NEW
 **POST** `/api/auth/google/login`
-Professional endpoint that returns JWT token directly (no redirect). Use this for API clients.
+Returns JWT token directly (no redirect). Use this for API clients.
 
 ```typescript
 const googleLogin = async (authCode: string) => {
-  const response = await axios.post('https://api.cvflow.tech/api/auth/google/login', {
-    code: authCode
-  });
-  
-  // Store the JWT token
-  localStorage.setItem('authToken', response.data.access_token);
-  return response.data;
+  const { data } = await axios.post('https://api.cvflow.tech/api/auth/google/login', { code: authCode });
+  localStorage.setItem('authToken', data.access_token);
+  return data;
 };
-```
-
-**Response (200):**
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer"
-}
 ```
 
 #### 3c. Google Callback (Redirect Flow)
@@ -122,25 +104,14 @@ Get user information from Google access token for verification purposes.
 
 ```typescript
 const getGoogleUserInfo = async (googleAccessToken: string) => {
-  const response = await axios.get(`https://api.cvflow.tech/api/auth/google/user-info?access_token=${googleAccessToken}`);
-  return response.data;
+  const { data } = await axios.get(`https://api.cvflow.tech/api/auth/google/user-info?access_token=${googleAccessToken}`);
+  return data;
 };
-```
-
-**Response (200):**
-```json
-{
-  "id": "1234567890",
-  "email": "user@gmail.com", 
-  "name": "John Doe",
-  "picture": "https://lh3.googleusercontent.com/...",
-  "email_verified": true
-}
 ```
 
 ### 4. Logout User
 **POST** `/api/auth/logout`
-Logs out the current authenticated user.
+Logs out the current authenticated user (client-side only for JWT).
 
 ```typescript
 const logoutUser = async () => {
@@ -159,10 +130,10 @@ Retrieves information about the currently authenticated user.
 ```typescript
 const getCurrentUser = async () => {
   const token = localStorage.getItem('authToken');
-  const response = await axios.get('https://api.cvflow.tech/api/auth/me', {
+  const { data } = await axios.get('https://api.cvflow.tech/api/auth/me', {
     headers: { 'Authorization': `Bearer ${token}` }
   });
-  return response.data;
+  return data;
 };
 ```
 
@@ -173,142 +144,268 @@ Changes the password for the authenticated user.
 ```typescript
 const changePassword = async (currentPassword: string, newPassword: string) => {
   const token = localStorage.getItem('authToken');
-  const response = await axios.post('https://api.cvflow.tech/api/auth/change-password', {
+  const { data } = await axios.post('https://api.cvflow.tech/api/auth/change-password', {
     current_password: currentPassword,
     new_password: newPassword
-  }, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
+  }, { headers: { 'Authorization': `Bearer ${token}` } });
+  return data; // { success: true }
 };
 ```
 
-### 7. Request Password Reset
-**POST** `/api/auth/password-reset`
+### 7. Request Password Reset ⭐ UPDATED
+**POST** `/api/auth/forgot-password`
 Sends a password reset email to the user.
 
 ```typescript
 const requestPasswordReset = async (email: string) => {
-  const response = await axios.post('https://api.cvflow.tech/api/auth/password-reset', { email });
-  return response.data;
+  const { data } = await axios.post('https://api.cvflow.tech/api/auth/forgot-password', { email });
+  return data;
 };
 ```
 
-### 8. Confirm Password Reset
-**POST** `/api/auth/password-reset/confirm`
+### 8. Reset Password ⭐ UPDATED
+**POST** `/api/auth/reset-password`
 Confirms password reset using the token from email.
 
 ```typescript
-const confirmPasswordReset = async (token: string, newPassword: string) => {
-  const response = await axios.post('https://api.cvflow.tech/api/auth/password-reset/confirm', {
-    token, new_password: newPassword
-  });
-  return response.data;
+const resetPassword = async (token: string, newPassword: string) => {
+  const { data } = await axios.post('https://api.cvflow.tech/api/auth/reset-password', { token, new_password: newPassword });
+  return data;
 };
 ```
+
+### 9. Verify Reset Token ⭐ NEW
+**GET** `/api/auth/verify-reset-token/{token}`
+Verify if a reset token is valid.
+
+### 10. Refresh Token ⭐ NEW
+**POST** `/api/auth/refresh-token`
+Refreshes JWT token for the authenticated user.
 
 ---
 
 ## 👤 User Management (`/api/users`)
 
+Note: Some endpoints below have newer counterparts under Profile & Settings. Legacy routes remain for backward compatibility and are marked accordingly.
+
 ### 1. Get User Profile
 **GET** `/api/users/profile`
-Retrieves the current user's profile information.
+Retrieves the current user's profile information. (Legacy; prefer GET /api/users/me)
 
 ```typescript
 const getUserProfile = async () => {
   const token = localStorage.getItem('authToken');
-  const response = await axios.get('https://api.cvflow.tech/api/users/profile', {
+  const { data } = await axios.get('https://api.cvflow.tech/api/users/profile', {
     headers: { 'Authorization': `Bearer ${token}` }
   });
-  return response.data;
+  return data;
 };
 ```
 
 ### 2. Update User Profile
 **PUT** `/api/users/profile`
-Updates the current user's profile information.
+Updates the current user's profile information. (Legacy; prefer PATCH /api/users/me)
 
 ```typescript
-const updateUserProfile = async (profileData: {
-  full_name?: string;
-  phone?: string;
-  bio?: string;
-  location?: object;
-}) => {
+const updateUserProfile = async (profileData: Record<string, any>) => {
   const token = localStorage.getItem('authToken');
-  const response = await axios.put('https://api.cvflow.tech/api/users/profile', profileData, {
+  const { data } = await axios.put('https://api.cvflow.tech/api/users/profile', profileData, {
     headers: { 'Authorization': `Bearer ${token}` }
   });
-  return response.data;
+  return data;
 };
 ```
 
 ### 3. Upload Avatar
-**POST** `/api/users/avatar`
-Uploads a profile picture for the user.
+- Legacy: **POST** `/api/users/upload-avatar`
+- New: see Profile & Settings → `PUT /api/users/me/avatar`
 
 ```typescript
-const uploadAvatar = async (file: File) => {
+const uploadAvatarLegacy = async (file: File) => {
   const token = localStorage.getItem('authToken');
   const formData = new FormData();
   formData.append('file', file);
-  
-  const response = await axios.post('https://api.cvflow.tech/api/users/avatar', formData, {
-    headers: { 
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'multipart/form-data'
-    }
+  const { data } = await axios.post('https://api.cvflow.tech/api/users/upload-avatar', formData, {
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'multipart/form-data' }
   });
-  return response.data;
+  return data;
 };
 ```
 
-### 4. Get User Dashboard Analytics
-**GET** `/api/users/dashboard`
-Retrieves analytics data for the user's dashboard.
+### 4. Get Dashboard Analytics ⭐ UPDATED PATH
+**GET** `/api/users/dashboard-analytics`
+Detailed analytics for the user's dashboard.
+
+### 5. Verification Status
+**GET** `/api/users/verification-status`
+Returns KYC/verification status for the current user.
+
+### 6. Wallet
+- Balance: **GET** `/api/users/wallet/balance`
+- Update (testing/admin): **PUT** `/api/users/wallet`
+- Detailed: **GET** `/api/users/wallet/detailed`
+
+### 7. Detailed Profiles
+- Own detailed profile: **GET** `/api/users/profile/detailed`
+- Public detailed profile: **GET** `/api/users/{user_id}/profile`
+
+### 8. Earnings & Payouts
+- Earnings breakdown: **GET** `/api/users/earnings?months=12`
+- Request payout: **POST** `/api/users/payout`
+- List payouts: **GET** `/api/users/payouts`
+
+### 9. Owner Analytics
+- Overview: **GET** `/api/users/owner-analytics`
+- Reviews aggregation: **GET** `/api/users/reviews-aggregation`
+- Performance metrics: **GET** `/api/users/performance-metrics`
+
+---
+
+## 👤 Profile & Settings (under /api)
+
+Note: Email-change endpoints have been removed. Do not call request-email-change or confirm-email-change.
+
+- Profile
+  - GET /api/users/me → MeProfileOut
+  - PATCH /api/users/me → { success: true }
+  - PUT /api/users/me/avatar → { avatar_url }
+  - DELETE /api/users/me/avatar → { success: true }
+  - GET /api/users/{id} (public) → PublicUserOut (respects privacy)
+
+- Username & availability
+  - GET /api/users/availability?username=foo → { available: boolean, suggestions?: string[] }
+
+- Security & sessions
+  - POST /api/auth/change-password → { success: true }
+  - GET /api/auth/sessions → SessionOut[]
+  - DELETE /api/auth/sessions → { success: true } (delete all)
+  - DELETE /api/auth/sessions/{id} → { success: true }
+
+- Notifications V2
+  - GET /api/notifications/feed?page=1&per_page=20&unread_only=false → { items: NotificationFeedItem[], next_page?: number }
+  - POST /api/notifications/read { ids?: string[] } → { message, count } (omit ids → all read)
+  - GET /api/notifications/settings/v2 → NotificationSettingsV2
+  - PATCH /api/notifications/settings → NotificationSettingsV2 (nested partial update)
+  - Legacy retained: GET/PUT /api/notifications/settings (flat)
+
+- Privacy & messaging
+  - GET /api/users/me/privacy → PrivacySettings
+  - PATCH /api/users/me/privacy → { success: true }
+  - Blocks: GET /api/users/me/blocks → BlockedUserOut[]; POST /api/users/me/blocks { user_id } → { success: true }; DELETE /api/users/me/blocks/{user_id} → { success: true }
+
+- Addresses (current user)
+  - GET /api/users/me/addresses → AddressOut[]
+  - POST /api/users/me/addresses → { id }
+  - PATCH /api/users/me/addresses/{addr_id} → { success: true }
+  - DELETE /api/users/me/addresses/{addr_id} → { success: true }
+  - Rule: Only one default address at a time.
+
+- Account lifecycle
+  - POST /api/users/me/export → { success: true }
+  - DELETE /api/users/me → { success: true } (password required if user has password)
+
+Quick TS examples:
 
 ```typescript
-const getUserDashboard = async () => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.get('https://api.cvflow.tech/api/users/dashboard', {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
+// Me
+const me = async () => axios.get('/api/users/me', auth()).then(r => r.data);
+const updateMe = async (patch: any) => axios.patch('/api/users/me', patch, auth()).then(r => r.data);
+
+// Availability
+const checkUsername = (u: string) => axios.get('/api/users/availability', { params: { username: u } }).then(r => r.data);
+
+// Sessions
+const sessions = () => axios.get('/api/auth/sessions', auth()).then(r => r.data);
+const revokeSession = (id: string) => axios.delete(`/api/auth/sessions/${id}`, auth());
 ```
 
-**Response (200):**
-```json
-{
-  "total_pets": 5,
-  "active_bookings": 2,
-  "total_earnings": 1500.00,
-  "recent_activity": [],
-  "wallet_balance": 750.00
-}
-```
+---
 
-### 5. Submit Verification Documents
-**POST** `/api/users/documents`
-Submits identity verification documents.
+## 💬 Chat/Conversations (`/api/conversations`)
+
+### 1. Create Conversation
+**POST** `/api/conversations`
+Starts a new conversation with another user.
 
 ```typescript
-const submitDocuments = async (files: File[], documentType: string) => {
+const createConversation = async (recipientId: string, petId?: string, initialMessage?: string) => {
   const token = localStorage.getItem('authToken');
-  const formData = new FormData();
-  files.forEach(file => formData.append('files', file));
-  formData.append('document_type', documentType);
-  
-  const response = await axios.post('https://api.cvflow.tech/api/users/documents', formData, {
-    headers: { 
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-  return response.data;
+  const { data } = await axios.post('https://api.cvflow.tech/api/conversations', { recipient_id: recipientId, pet_id: petId, initial_message: initialMessage }, { headers: { 'Authorization': `Bearer ${token}` } });
+  return data;
 };
 ```
+
+### 2. Get User Conversations
+**GET** `/api/conversations`
+Retrieves all conversations for the current user.
+
+```typescript
+const getUserConversations = async (archived = false, page = 1) => axios.get('/api/conversations', { params: { archived, page }, ...auth()}).then(r => r.data);
+```
+
+### 3. Get Conversation
+**GET** `/api/conversations/{conversation_id}`
+Gets a conversation with messages.
+
+### 4. Send Message (Unified) ⭐ NEW
+**POST** `/api/conversations/{conversation_id}/send`
+Text, images, or both in one endpoint.
+
+```typescript
+const sendMessage = async (id: string, content?: string, images?: File[]) => {
+  const fd = new FormData();
+  if (content) fd.append('content', content);
+  images?.forEach(f => fd.append('images', f));
+  return axios.post(`/api/conversations/${id}/send`, fd, { headers: { ...auth().headers, 'Content-Type': 'multipart/form-data' } }).then(r => r.data);
+};
+```
+
+### 5. Mark Conversation Read ⭐ NEW
+**PUT** `/api/conversations/{conversation_id}/read`
+Marks all messages as read.
+
+### 6. Delete Message ⭐ NEW
+**DELETE** `/api/conversations/{conversation_id}/messages/{message_id}`
+Deletes a message (sender only).
+
+### 7. Archive/Unarchive Conversation ⭐ NEW
+**PUT** `/api/conversations/{conversation_id}/archive`
+Body: `{ "archive": true | false }`.
+
+### 8. Offers
+- Create: **POST** `/api/conversations/{conversation_id}/offers`
+- List: **GET** `/api/conversations/{conversation_id}/offers`
+- Get one: **GET** `/api/conversations/{conversation_id}/offers/{offer_id}`
+- Respond: **POST** `/api/conversations/{conversation_id}/offers/{offer_id}/respond`
+
+Legacy (deprecated):
+- `POST /api/conversations/{id}/messages` (text-only)
+- `POST /api/conversations/{id}/images` (images-only)
+
+---
+
+## 🔔 Notifications (`/api/notifications`)
+
+### V2 (recommended)
+- Feed: **GET** `/api/notifications/feed?page=1&per_page=20&unread_only=false` → `{ items: NotificationFeedItem[], next_page?: number }`
+- Mark read: **POST** `/api/notifications/read` body `{ ids?: string[] }` (omitting ids marks all)
+- Get settings: **GET** `/api/notifications/settings/v2`
+- Update settings (nested partial): **PATCH** `/api/notifications/settings`
+
+```typescript
+const getFeed = (p=1,u=false)=>axios.get('/api/notifications/feed',{params:{page:p,unread_only:u},...auth()}).then(r=>r.data);
+const readSome = (ids?: string[])=>axios.post('/api/notifications/read',{ids},auth()).then(r=>r.data);
+const getNotifSettings = ()=>axios.get('/api/notifications/settings/v2',auth()).then(r=>r.data);
+const patchNotifSettings = (patch:any)=>axios.patch('/api/notifications/settings',patch,auth()).then(r=>r.data);
+```
+
+### Legacy
+- List all: **GET** `/api/notifications`
+- Unread: **GET** `/api/notifications/unread`
+- Unread count: **GET** `/api/notifications/count`
+- Mark one read: **PUT** `/api/notifications/{notification_id}/read`
+- Mark all read: **PUT** `/api/notifications/read-all`
+- Settings (flat): **GET/PUT** `/api/notifications/settings`
 
 ---
 
@@ -544,404 +641,6 @@ const updateBookingStatus = async (bookingId: string, status: string, notes?: st
 
 ---
 
-## 💬 Chat/Conversations (`/api/conversations`)
-
-### 1. Create Conversation
-**POST** `/api/conversations`
-Starts a new conversation with another user.
-
-```typescript
-const createConversation = async (recipientId: string, petId?: string, initialMessage?: string) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.post('https://api.cvflow.tech/api/conversations', {
-    recipient_id: recipientId,
-    pet_id: petId,
-    initial_message: initialMessage
-  }, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 2. Get User Conversations
-**GET** `/api/conversations`
-Retrieves all conversations for the current user.
-
-```typescript
-const getUserConversations = async (archived: boolean = false, page: number = 1) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.get('https://api.cvflow.tech/api/conversations', {
-    params: { archived, page },
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 3. Get Conversation Messages
-**GET** `/api/conversations/{conversation_id}`
-Retrieves a specific conversation with all messages.
-
-```typescript
-const getConversation = async (conversationId: string) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.get(`https://api.cvflow.tech/api/conversations/${conversationId}`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 4. Send Message (Unified) ⭐ NEW
-**POST** `/api/conversations/{conversation_id}/send`
-Professional unified endpoint to send text, images, or both in a single request with smart auto-detection.
-
-```typescript
-// Send text message (message_type is auto-detected)
-const sendTextMessage = async (conversationId: string, content: string) => {
-  const token = localStorage.getItem('authToken');
-  const formData = new FormData();
-  formData.append('content', content);
-  // message_type automatically detected as 'text'
-  
-  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/send`, formData, {
-    headers: { 
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-  return response.data;
-};
-
-// Send images only (message_type is auto-detected)
-const sendImages = async (conversationId: string, files: File[]) => {
-  const token = localStorage.getItem('authToken');
-  const formData = new FormData();
-  // message_type automatically detected as 'image'
-  files.forEach(file => formData.append('images', file));
-  
-  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/send`, formData, {
-    headers: { 
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-  return response.data;
-};
-
-// Send text with images (message_type is auto-detected as 'mixed')
-const sendMixedMessage = async (conversationId: string, content: string, files: File[]) => {
-  const token = localStorage.getItem('authToken');
-  const formData = new FormData();
-  formData.append('content', content);
-  // message_type automatically detected as 'mixed'
-  files.forEach(file => formData.append('images', file));
-  
-  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/send`, formData, {
-    headers: { 
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-  return response.data;
-};
-```
-
-**Note**: The `message_type` parameter is optional - the API automatically detects the type based on content and images provided!
-
-### 5. Send Message (Legacy)
-**POST** `/api/conversations/{conversation_id}/messages` - DEPRECATED
-Legacy endpoint for text messages only. Use the unified `/send` endpoint instead.
-
-### 6. Send Images (Legacy)
-**POST** `/api/conversations/{conversation_id}/images` - DEPRECATED
-Legacy endpoint for images only. Use the unified `/send` endpoint instead.
-
-### 7. Create Offer
-**POST** `/api/conversations/{conversation_id}/offers`
-Creates a rental offer within a conversation.
-
-```typescript
-const createOffer = async (conversationId: string, offerData: {
-  pet_id: string;
-  start_date: string;
-  end_date: string;
-  total_amount: number;
-  notes?: string;
-}) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/offers`, offerData, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 8. Respond to Offer
-**POST** `/api/conversations/{conversation_id}/offers/{offer_id}/respond`
-Accepts or rejects an offer in a conversation.
-
-```typescript
-const respondToOffer = async (conversationId: string, offerId: string, accept: boolean, message?: string) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/offers/${offerId}/respond`, {
-    accept, message
-  }, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
----
-
-## 🔔 Notifications (`/api/notifications`)
-
-### 1. Get All Notifications
-**GET** `/api/notifications`
-Retrieves all notifications for the current user.
-
-```typescript
-const getAllNotifications = async (page: number = 1, perPage: number = 20) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.get('https://api.cvflow.tech/api/notifications', {
-    params: { page, per_page: perPage },
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 2. Get Unread Notifications
-**GET** `/api/notifications/unread`
-Retrieves only unread notifications for the user.
-
-```typescript
-const getUnreadNotifications = async () => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.get('https://api.cvflow.tech/api/notifications/unread', {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 3. Get Unread Count
-**GET** `/api/notifications/count`
-Gets the count of unread notifications.
-
-```typescript
-const getUnreadCount = async () => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.get('https://api.cvflow.tech/api/notifications/count', {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data; // { "count": 5 }
-};
-```
-
-### 4. Mark as Read
-**PUT** `/api/notifications/{notification_id}/read`
-Marks a specific notification as read.
-
-```typescript
-const markNotificationAsRead = async (notificationId: string) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.put(`https://api.cvflow.tech/api/notifications/${notificationId}/read`, {}, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 5. Mark All as Read
-**PUT** `/api/notifications/read-all`
-Marks all notifications as read for the user.
-
-```typescript
-const markAllAsRead = async () => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.put('https://api.cvflow.tech/api/notifications/read-all', {}, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
----
-
-## ⭐ Reviews & Ratings (`/api/reviews`)
-
-### 1. Create Review
-**POST** `/api/reviews/{entity_type}/{entity_id}`
-Creates a review for a pet, user, or booking.
-
-```typescript
-const createReview = async (entityType: 'pet' | 'user', entityId: string, reviewData: {
-  rating: number;
-  title: string;
-  content: string;
-  transaction_id?: string;
-}) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.post(`https://api.cvflow.tech/api/reviews/${entityType}/${entityId}`, reviewData, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 2. Get Entity Reviews
-**GET** `/api/reviews/{entity_type}/{entity_id}`
-Gets all reviews for a specific entity (pet or user).
-
-```typescript
-const getEntityReviews = async (entityType: 'pet' | 'user', entityId: string, page: number = 1) => {
-  const response = await axios.get(`https://api.cvflow.tech/api/reviews/${entityType}/${entityId}`, {
-    params: { page }
-  });
-  return response.data;
-};
-```
-
-### 3. Get Review Summary
-**GET** `/api/reviews/{entity_type}/{entity_id}/summary`
-Gets review statistics and summary for an entity.
-
-```typescript
-const getReviewSummary = async (entityType: 'pet' | 'user', entityId: string) => {
-  const response = await axios.get(`https://api.cvflow.tech/api/reviews/${entityType}/${entityId}/summary`);
-  return response.data;
-};
-```
-
-**Response (200):**
-```json
-{
-  "average_rating": 4.5,
-  "total_reviews": 24,
-  "rating_distribution": {
-    "5": 12,
-    "4": 8,
-    "3": 3,
-    "2": 1,
-    "1": 0
-  }
-}
-```
-
----
-
-## 🚨 Reports (`/api/reports`)
-
-### 1. Report User
-**POST** `/api/reports/users/{user_id}`
-Reports a user for inappropriate behavior.
-
-```typescript
-const reportUser = async (userId: string, reportData: {
-  reason: string;
-  details: string;
-  evidence_urls?: string[];
-}) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.post(`https://api.cvflow.tech/api/reports/users/${userId}`, reportData, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 2. Report Pet
-**POST** `/api/reports/pets/{pet_id}`
-Reports a pet listing for inappropriate content.
-
-```typescript
-const reportPet = async (petId: string, reportData: {
-  reason: string;
-  details: string;
-  evidence_urls?: string[];
-}) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.post(`https://api.cvflow.tech/api/reports/pets/${petId}`, reportData, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 3. Upload Report Evidence
-**POST** `/api/reports/evidence`
-Uploads evidence files for a report.
-
-```typescript
-const uploadReportEvidence = async (files: File[]) => {
-  const token = localStorage.getItem('authToken');
-  const formData = new FormData();
-  files.forEach(file => formData.append('files', file));
-  
-  const response = await axios.post('https://api.cvflow.tech/api/reports/evidence', formData, {
-    headers: { 
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'multipart/form-data'
-    }
-  });
-  return response.data;
-};
-```
-
----
-
-## 📅 Calendar & Availability (`/api/calendar`)
-
-### 1. Get Pet Calendar
-**GET** `/api/calendar/pets/{pet_id}`
-Gets calendar data showing availability for a pet.
-
-```typescript
-const getPetCalendar = async (petId: string, startDate: string, endDate: string) => {
-  const response = await axios.get(`https://api.cvflow.tech/api/calendar/pets/${petId}`, {
-    params: { start_date: startDate, end_date: endDate }
-  });
-  return response.data;
-};
-```
-
-### 2. Block Dates
-**POST** `/api/calendar/pets/{pet_id}/blocked-dates`
-Blocks specific dates for a pet (owner only).
-
-```typescript
-const blockDates = async (petId: string, blockData: {
-  start_date: string;
-  end_date: string;
-  reason: string;
-  notes?: string;
-}) => {
-  const token = localStorage.getItem('authToken');
-  const response = await axios.post(`https://api.cvflow.tech/api/calendar/pets/${petId}/blocked-dates`, blockData, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  return response.data;
-};
-```
-
-### 3. Check Availability
-**GET** `/api/calendar/availability/{pet_id}`
-Checks if a pet is available for specific dates.
-
-```typescript
-const checkAvailability = async (petId: string, startDate: string, endDate: string) => {
-  const response = await axios.get(`https://api.cvflow.tech/api/calendar/availability/${petId}`, {
-    params: { start_date: startDate, end_date: endDate }
-  });
-  return response.data;
-};
-```
-
----
-
 ## 🏥 Health Records (`/api/health-records`)
 
 ### 1. Create Health Record
@@ -1034,6 +733,48 @@ const getCareInstructions = async (petId: string) => {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   return response.data;
+};
+```
+
+---
+
+## 🚩 Reports (`/api/reports`)
+
+Report inappropriate content and manage reports.
+
+- Report a user
+  - POST `/api/reports/users/{user_id}` body: `{ reason, details?, evidence_urls? }`
+- Report a pet
+  - POST `/api/reports/pets/{pet_id}` body: `{ reason, details?, evidence_urls? }`
+- Report a review
+  - POST `/api/reports/reviews/{review_id}` body: `{ reason, details?, evidence_urls? }`
+- Report a message
+  - POST `/api/reports/messages/{message_id}` body: `{ reason, details?, evidence_urls? }`
+- Upload evidence images
+  - POST `/api/reports/evidence` multipart: `files[]` → `{ evidence_urls: string[] }`
+- My reports
+  - GET `/api/reports/my-reports?page=1&per_page=20`
+- Get one
+  - GET `/api/reports/{report_id}`
+- Delete
+  - DELETE `/api/reports/{report_id}`
+
+Admin only:
+- List all
+  - GET `/api/reports?status=pending|reviewed|resolved&entity_type=user|pet|review|message&page=1&per_page=20`
+- Update status
+  - PUT `/api/reports/{report_id}/status` body: `{ status, admin_notes? }`
+
+TypeScript examples:
+
+```typescript
+const reportUser = (userId: string, payload: { reason: string; details?: string; evidence_urls?: string[] }) =>
+  axios.post(`/api/reports/users/${userId}`, payload, auth()).then(r => r.data);
+
+const uploadReportEvidence = (files: File[]) => {
+  const fd = new FormData();
+  files.forEach(f => fd.append('files', f));
+  return axios.post('/api/reports/evidence', fd, { headers: { ...auth().headers, 'Content-Type': 'multipart/form-data' } }).then(r => r.data);
 };
 ```
 
@@ -1134,9 +875,16 @@ const getApiInfo = async () => {
 Most endpoints require authentication using JWT tokens. Include the token in the Authorization header:
 
 ```typescript
-headers: {
-  'Authorization': `Bearer ${token}`
-}
+headers: { 'Authorization': `Bearer ${token}` }
 ```
 
-Store the token after successful login/registration and include it in subsequent requests. 
+Store the token after successful login/registration and include it in subsequent requests.
+
+---
+
+## 🤖 AI Endpoints (`/api/ai`)
+
+At this time, there are no AI endpoints implemented in this repository.
+
+- If/when AI features are added, they will be under `/api/ai`.
+- Once available, this section should enumerate each endpoint (method + path), required params, and example responses.

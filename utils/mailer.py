@@ -240,6 +240,5 @@ class EmailService:
         finally:
             self.disconnect_smtp()
 
-
 # Global email service instance
-email_service = EmailService() 
+email_service = EmailService()

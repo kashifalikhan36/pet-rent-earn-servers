@@ -62,6 +62,23 @@ async def register(user_in: UserCreate, request: Request):
         expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
     )
     
+    # Create session document
+    try:
+        db = request.app.mongodb
+        now = __import__("datetime").datetime.utcnow()
+        result = await db.sessions.insert_one({
+            "user_id": user["id"],
+            "ip": client_ip,
+            "user_agent": user_agent,
+            "created_at": now,
+            "last_seen_at": now,
+            "current": True,
+        })
+        # Mark other sessions as not current
+        await db.sessions.update_many({"user_id": user["id"], "_id": {"$ne": result.inserted_id}}, {"$set": {"current": False}})
+    except Exception as e:
+        logger.warning(f"Failed to create session on register: {e}")
+    
     return Token(access_token=token, token_type="bearer")
 
 
@@ -137,6 +154,28 @@ async def login(request: Request):
             token_data,
             expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
         )
+        
+        # Create or update session document
+        try:
+            db = request.app.mongodb
+            now = __import__("datetime").datetime.utcnow()
+            existing = await db.sessions.find_one({"user_id": user["id"], "ip": client_ip, "user_agent": user_agent})
+            if existing:
+                await db.sessions.update_one({"_id": existing["_id"]}, {"$set": {"last_seen_at": now, "current": True}})
+                current_id = existing["_id"]
+            else:
+                res = await db.sessions.insert_one({
+                    "user_id": user["id"],
+                    "ip": client_ip,
+                    "user_agent": user_agent,
+                    "created_at": now,
+                    "last_seen_at": now,
+                    "current": True,
+                })
+                current_id = res.inserted_id
+            await db.sessions.update_many({"user_id": user["id"], "_id": {"$ne": current_id}}, {"$set": {"current": False}})
+        except Exception as e:
+            logger.warning(f"Failed to create/update session on login: {e}")
         
         return Token(access_token=token, token_type="bearer")
     
@@ -349,6 +388,30 @@ async def google_login(
             expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
         )
         
+        # Create or update session document
+        try:
+            db = request.app.mongodb
+            now = __import__("datetime").datetime.utcnow()
+            client_ip = request.client.host if request.client else None
+            user_agent = request.headers.get("user-agent", "")
+            existing = await db.sessions.find_one({"user_id": user["id"], "ip": client_ip, "user_agent": user_agent})
+            if existing:
+                await db.sessions.update_one({"_id": existing["_id"]}, {"$set": {"last_seen_at": now, "current": True}})
+                current_id = existing["_id"]
+            else:
+                res = await db.sessions.insert_one({
+                    "user_id": user["id"],
+                    "ip": client_ip,
+                    "user_agent": user_agent,
+                    "created_at": now,
+                    "last_seen_at": now,
+                    "current": True,
+                })
+                current_id = res.inserted_id
+            await db.sessions.update_many({"user_id": user["id"], "_id": {"$ne": current_id}}, {"$set": {"current": False}})
+        except Exception as e:
+            logger.warning(f"Failed to create/update session on google login: {e}")
+        
         return Token(access_token=access_token, token_type="bearer")
         
     except HTTPException:
@@ -438,6 +501,28 @@ async def google_callback(
             token_payload,
             expires_delta=timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
         )
+        
+        # Create or update session document
+        try:
+            db = request.app.mongodb
+            now = __import__("datetime").datetime.utcnow()
+            existing = await db.sessions.find_one({"user_id": user["id"], "ip": client_ip, "user_agent": user_agent})
+            if existing:
+                await db.sessions.update_one({"_id": existing["_id"]}, {"$set": {"last_seen_at": now, "current": True}})
+                current_id = existing["_id"]
+            else:
+                res = await db.sessions.insert_one({
+                    "user_id": user["id"],
+                    "ip": client_ip,
+                    "user_agent": user_agent,
+                    "created_at": now,
+                    "last_seen_at": now,
+                    "current": True,
+                })
+                current_id = res.inserted_id
+            await db.sessions.update_many({"user_id": user["id"], "_id": {"$ne": current_id}}, {"$set": {"current": False}})
+        except Exception as e:
+            logger.warning(f"Failed to create/update session on google callback: {e}")
         
         # Redirect to frontend with token
         redirect_url = f"{settings.FRONTEND_URL}/auth/success?token={access_token}"

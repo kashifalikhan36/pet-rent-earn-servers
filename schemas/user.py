@@ -1,5 +1,5 @@
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, date
+from typing import Optional, List
 from pydantic import BaseModel, Field, EmailStr, validator
 from enum import Enum
 
@@ -160,7 +160,7 @@ class VerificationSubmission(BaseModel):
     additional_info: Optional[str] = None
 
 
-class UserDetailedOut(UserOut):
+class UserDetailedOut(BaseModel):
     """Schema for detailed user profile output with stats."""
     email: Optional[EmailStr] = None
     total_pets: int = 0
@@ -267,3 +267,151 @@ class UserReport(BaseModel):
     report_type: str  # inappropriate, fraud, harassment, etc.
     description: str
     evidence_urls: list[str] = []
+
+
+# ---- New schemas for Profile & Settings spec ----
+class Gender(str, Enum):
+    male = "male"
+    female = "female"
+    non_binary = "non_binary"
+    other = "other"
+    prefer_not_to_say = "prefer_not_to_say"
+
+
+class SocialLinks(BaseModel):
+    instagram: Optional[str] = None
+    twitter: Optional[str] = None
+    website: Optional[str] = None
+
+
+class LocationPublic(BaseModel):
+    country: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+
+
+class MeProfileOut(BaseModel):
+    id: str
+    email: EmailStr
+    username: Optional[str] = None
+    name: Optional[str] = None
+    bio: Optional[str] = None
+    avatar_url: Optional[str] = None
+    birthdate: Optional[date] = None
+    gender: Optional[Gender] = None
+    location: Optional[LocationPublic] = None
+    links: Optional[SocialLinks] = None
+
+
+class MeProfilePatch(BaseModel):
+    username: Optional[str] = Field(None, min_length=3, max_length=30)
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    bio: Optional[str] = Field(None, max_length=500)
+    birthdate: Optional[date] = None
+    gender: Optional[Gender] = None
+    location: Optional[LocationPublic] = None
+    links: Optional[SocialLinks] = None
+
+
+class PublicLocation(BaseModel):
+    city: Optional[str] = None
+    country: Optional[str] = None
+
+
+class PublicUserOut(BaseModel):
+    id: str
+    username: Optional[str] = None
+    name: Optional[str] = None
+    bio: Optional[str] = None
+    avatar_url: Optional[str] = None
+    location: Optional[PublicLocation] = None
+    links: Optional[SocialLinks] = None
+
+
+class UsernameAvailabilityResponse(BaseModel):
+    available: bool
+    suggestions: Optional[List[str]] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @validator('new_password')
+    def password_min_length_v2(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+        return v
+
+
+class ProfileVisibility(str, Enum):
+    public = "public"
+    private = "private"
+
+
+class AllowMessagesFrom(str, Enum):
+    everyone = "everyone"
+    following = "following"
+    none = "none"
+
+
+class PrivacySettings(BaseModel):
+    profile_visibility: ProfileVisibility = ProfileVisibility.public
+    discoverable_by_email: bool = True
+    discoverable_by_phone: bool = False
+    allow_messages_from: AllowMessagesFrom = AllowMessagesFrom.everyone
+
+
+class PrivacySettingsUpdate(BaseModel):
+    profile_visibility: Optional[ProfileVisibility] = None
+    discoverable_by_email: Optional[bool] = None
+    discoverable_by_phone: Optional[bool] = None
+    allow_messages_from: Optional[AllowMessagesFrom] = None
+
+
+class BlockedUserOut(BaseModel):
+    user_id: str
+    name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    blocked_at: datetime
+
+
+class AddressOut(BaseModel):
+    id: str
+    line1: str
+    line2: Optional[str] = None
+    city: str
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: str
+    is_default: bool = False
+
+
+class AddressCreate(BaseModel):
+    line1: str
+    line2: Optional[str] = None
+    city: str
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: str
+    is_default: Optional[bool] = False
+
+
+class AddressUpdate(BaseModel):
+    line1: Optional[str] = None
+    line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    is_default: Optional[bool] = None
+
+
+class SessionOut(BaseModel):
+    id: str
+    ip: Optional[str] = None
+    user_agent: Optional[str] = None
+    created_at: datetime
+    last_seen_at: Optional[datetime] = None
+    current: bool = False

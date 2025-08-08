@@ -1,6 +1,6 @@
 import uvicorn
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -12,6 +12,7 @@ from core.config import get_settings
 from routers import auth, pets, users, transactions, conversations, bookings, notifications, reviews, reports, calendar, care_instructions, health_records
 # TODO: Add new router imports as they are created
 # from routers import admin, payments
+from routers import profile_settings
 
 # Configure logging
 logging.basicConfig(
@@ -55,6 +56,8 @@ async def create_database_indexes(database):
     # User indexes
     await database.users.create_index("email", unique=True)
     await database.users.create_index("google_id", sparse=True)
+    # New: username unique
+    await database.users.create_index("username", unique=True, sparse=True)
     
     # Pet listing indexes
     await database.pets.create_index([("location.coordinates", "2dsphere")])
@@ -132,6 +135,22 @@ async def create_database_indexes(database):
     await database.payouts.create_index([("user_id", 1), ("status", 1)])
     await database.payouts.create_index("method")
 
+    # New: sessions, blocks, addresses, privacy, exports
+    await database.sessions.create_index("user_id")
+    await database.sessions.create_index("created_at")
+    await database.sessions.create_index("last_seen_at")
+
+    await database.blocks.create_index([("user_id", 1), ("blocked_user_id", 1)], unique=True)
+    await database.blocks.create_index("blocked_at")
+
+    await database.addresses.create_index("user_id")
+    await database.addresses.create_index([("user_id", 1), ("is_default", 1)])
+
+    await database.privacy_settings.create_index("user_id", unique=True)
+
+    await database.exports.create_index("user_id")
+    await database.exports.create_index("requested_at")
+
 # Create FastAPI app
 app = FastAPI(
     title="Pet Rent & Earn API",
@@ -156,6 +175,7 @@ app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIRECTORY), name="up
 # Include routers with API prefix
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
+app.include_router(profile_settings.router, prefix="/api", tags=["profile-settings"])
 app.include_router(pets.router, prefix="/api/pets", tags=["pets"])
 app.include_router(transactions.router, prefix="/api/transactions", tags=["transactions"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["conversations"])
@@ -234,6 +254,20 @@ async def log_requests(request, call_next):
         logger.debug(f"Authorization header present: {auth_header[:20]}...")
     else:
         logger.debug("No Authorization header found")
+
+    # Update session last_seen_at best-effort when authenticated
+    if auth_header and hasattr(app, 'mongodb'):
+        try:
+            # We don't decode JWT here; instead update any current session matching IP+UA
+            client_ip = request.client.host if request.client else None
+            user_agent = request.headers.get("user-agent", "")
+            now = datetime.datetime.utcnow()
+            await app.mongodb.sessions.update_many(
+                {"ip": client_ip, "user_agent": user_agent, "current": True},
+                {"$set": {"last_seen_at": now}}
+            )
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"session last_seen update skipped: {e}")
 
     response = await call_next(request)
 

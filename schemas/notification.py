@@ -73,4 +73,55 @@ class NotificationSettingsUpdate(BaseModel):
     payments: Optional[bool] = None
     system_announcements: Optional[bool] = None
     offers: Optional[bool] = None
-    disputes: Optional[bool] = None 
+    disputes: Optional[bool] = None
+
+
+# V2 feed schemas matching spec
+class NotificationFeedItem(BaseModel):
+    id: str
+    type: str
+    title: str
+    body: str
+    read: bool
+    created_at: datetime
+    data: Optional[Dict[str, Any]] = None
+
+
+class NotificationFeedPage(BaseModel):
+    items: List[NotificationFeedItem]
+    next_page: Optional[int] = None
+
+
+class NotificationReadRequest(BaseModel):
+    ids: Optional[List[str]] = None
+
+
+# V2 settings schemas matching spec
+class EmailChannelSettings(BaseModel):
+    marketing: bool = False
+    product: bool = True
+    security: bool = True
+
+
+class PushChannelSettings(BaseModel):
+    messages: bool = True
+    offers: bool = True
+    bookings: bool = True
+
+
+class InAppChannelSettings(BaseModel):
+    messages: bool = True
+    offers: bool = True
+    system: bool = True
+
+
+class NotificationSettingsV2(BaseModel):
+    email: EmailChannelSettings = Field(default_factory=EmailChannelSettings)
+    push: PushChannelSettings = Field(default_factory=PushChannelSettings)
+    in_app: InAppChannelSettings = Field(default_factory=InAppChannelSettings)
+
+
+class NotificationSettingsV2Update(BaseModel):
+    email: Optional[EmailChannelSettings] = None
+    push: Optional[PushChannelSettings] = None
+    in_app: Optional[InAppChannelSettings] = None
