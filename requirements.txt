@@ -16,6 +16,9 @@ pydantic
 pydantic_settings
 email-validator
 
+# Date & Time Utilities
+python-dateutil
+
 # HTTP Client
 httpx
 
