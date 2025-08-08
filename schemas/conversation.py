@@ -1,25 +1,49 @@
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
+from fastapi import UploadFile
+
+
+class MessageType(str, Enum):
+    """Types of messages that can be sent."""
+    TEXT = "text"
+    IMAGE = "image"
+    MIXED = "mixed"  # Text with images
+    SYSTEM = "system"  # System generated messages
 
 
 class MessageCreate(BaseModel):
-    """Schema for creating a message."""
-    content: str
-    attachment_urls: List[str] = []
+    """Schema for creating a message - supports text, images, or both."""
+    content: Optional[str] = ""
+    message_type: MessageType = MessageType.TEXT
+    # Note: Images will be handled separately via file upload in the endpoint
+    
+    @validator('content')
+    def validate_content(cls, v, values):
+        # We'll validate this in the endpoint logic instead
+        # This allows more flexible validation based on files and other context
+        return v
 
 
 class MessageOut(BaseModel):
     """Schema for message output."""
     id: str
-    conversation_id: str  # Required field that was missing
+    conversation_id: str
     sender_id: str
     content: str
+    message_type: MessageType = MessageType.TEXT
     read: bool = False
     attachment_urls: List[str] = []
+    # Legacy field for backwards compatibility
     is_image_message: bool = False
     created_at: datetime
+    edited_at: Optional[datetime] = None
+    
+    @validator('is_image_message', always=True)
+    def set_is_image_message(cls, v, values):
+        message_type = values.get('message_type', MessageType.TEXT)
+        return message_type in [MessageType.IMAGE, MessageType.MIXED]
 
 
 class ConversationCreate(BaseModel):
@@ -28,7 +52,6 @@ class ConversationCreate(BaseModel):
     message: str
     related_pet_id: Optional[str] = None
     related_booking_id: Optional[str] = None
-    attachment_urls: List[str] = []
 
 
 class ConversationOut(BaseModel):
@@ -69,6 +92,7 @@ class ArchiveConversationRequest(BaseModel):
     archive: bool = True
 
 
+# Offer-related schemas remain the same
 class OfferStatus(str, Enum):
     """Enum for offer status."""
     PENDING = "pending"

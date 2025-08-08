@@ -1,7 +1,7 @@
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
-from fastapi import Request
-from schemas.conversation import ConversationCreate, MessageCreate
+from fastapi import Request, UploadFile
+from schemas.conversation import ConversationCreate, MessageCreate, MessageType
 from bson.objectid import ObjectId
 
 
@@ -30,11 +30,13 @@ async def create_conversation(
             conversation_id = str(existing_conversation["_id"])
             message = {
                 "id": str(ObjectId()),
-                "conversation_id": conversation_id,  # Add this field
+                "conversation_id": conversation_id,
                 "sender_id": sender_id,
                 "content": data.message,
+                "message_type": MessageType.TEXT,
                 "read": False,
-                "attachment_urls": data.attachment_urls,
+                "attachment_urls": [],
+                "is_image_message": False,
                 "created_at": now
             }
             
@@ -77,11 +79,13 @@ async def create_conversation(
         # Add initial message
         message = {
             "id": str(ObjectId()),
-            "conversation_id": conversation_id,  # Add this field
+            "conversation_id": conversation_id,
             "sender_id": sender_id,
             "content": data.message,
+            "message_type": MessageType.TEXT,
             "read": False,
-            "attachment_urls": data.attachment_urls,
+            "attachment_urls": [],
+            "is_image_message": False,
             "created_at": now
         }
         
@@ -126,11 +130,23 @@ async def get_conversation(conversation_id: str, user_id: str, request: Request)
             conversation["id"] = str(conversation["_id"])
             del conversation["_id"]
             
-            # Ensure all messages have conversation_id
+            # Ensure all messages have proper schema
             if "messages" in conversation:
                 for message in conversation["messages"]:
                     if "conversation_id" not in message:
                         message["conversation_id"] = conversation["id"]
+                    # Ensure message_type exists for backwards compatibility
+                    if "message_type" not in message:
+                        if message.get("is_image_message", False):
+                            message["message_type"] = MessageType.IMAGE
+                        else:
+                            message["message_type"] = MessageType.TEXT
+                    # Ensure attachment_urls exists
+                    if "attachment_urls" not in message:
+                        message["attachment_urls"] = []
+                    # Ensure is_image_message is properly set
+                    if "is_image_message" not in message:
+                        message["is_image_message"] = message.get("message_type") in [MessageType.IMAGE, MessageType.MIXED]
             
             # Add participant details
             await _add_participant_details(conversation, database)
@@ -157,15 +173,17 @@ async def get_conversation(conversation_id: str, user_id: str, request: Request)
         return None
 
 
-async def send_message(
+async def send_unified_message(
     conversation_id: str,
     message_data: MessageCreate,
     sender_id: str,
-    request: Request
+    request: Request,
+    files: Optional[List[UploadFile]] = None
 ) -> Optional[Dict[str, Any]]:
-    """Send a new message in an existing conversation."""
+    """Send a unified message supporting text, images, or both."""
     try:
         database = request.app.mongodb
+        from utils.file_upload import upload_image_file
         
         # Check if conversation exists and user is participant
         conversation = await database.conversations.find_one({
@@ -175,16 +193,33 @@ async def send_message(
         
         if not conversation:
             return None
+        
+        # Determine message type and handle files
+        attachment_urls = []
+        message_type = message_data.message_type
+        
+        # Handle file uploads if provided
+        if files:
+            for file in files:
+                # Upload image (validation already done in router)
+                image_url = await upload_image_file(file, "conversation_images")
+                if image_url:
+                    attachment_urls.append(image_url)
+        
+        # Use the message type from the request (already validated in router)
+        # The router handles all validation and type detection
             
         # Create message
         now = datetime.utcnow()
         message = {
             "id": str(ObjectId()),
-            "conversation_id": conversation_id,  # Add this field
+            "conversation_id": conversation_id,
             "sender_id": sender_id,
-            "content": message_data.content,
+            "content": message_data.content or "",
+            "message_type": message_type,
             "read": False,
-            "attachment_urls": message_data.attachment_urls,
+            "attachment_urls": attachment_urls,
+            "is_image_message": message_type in [MessageType.IMAGE, MessageType.MIXED],
             "created_at": now
         }
         
@@ -200,8 +235,48 @@ async def send_message(
         return message
         
     except Exception as e:
-        print(f"Error sending message: {e}")
+        print(f"Error sending unified message: {e}")
         return None
+
+
+# Keep legacy send_message for backwards compatibility
+async def send_message(
+    conversation_id: str,
+    message_data: MessageCreate,
+    sender_id: str,
+    request: Request
+) -> Optional[Dict[str, Any]]:
+    """Send a text message (legacy function for backwards compatibility)."""
+    return await send_unified_message(
+        conversation_id=conversation_id,
+        message_data=message_data,
+        sender_id=sender_id,
+        request=request,
+        files=None
+    )
+
+
+# Keep legacy send_image_message for backwards compatibility
+async def send_image_message(
+    conversation_id: str,
+    user_id: str,
+    files: List[UploadFile],
+    request: Request
+) -> Optional[Dict[str, Any]]:
+    """Send image messages (legacy function for backwards compatibility)."""
+    
+    message_data = MessageCreate(
+        content="",
+        message_type=MessageType.IMAGE
+    )
+    
+    return await send_unified_message(
+        conversation_id=conversation_id,
+        message_data=message_data,
+        sender_id=user_id,
+        request=request,
+        files=files
+    )
 
 
 async def get_user_conversations(
@@ -237,11 +312,20 @@ async def get_user_conversations(
             conversation["id"] = conversation_id
             del conversation["_id"]
             
-            # Ensure all messages have conversation_id
+            # Ensure all messages have proper schema
             if "messages" in conversation:
                 for message in conversation["messages"]:
                     if "conversation_id" not in message:
                         message["conversation_id"] = conversation_id
+                    # Ensure message_type exists for backwards compatibility
+                    if "message_type" not in message:
+                        if message.get("is_image_message", False):
+                            message["message_type"] = MessageType.IMAGE
+                        else:
+                            message["message_type"] = MessageType.TEXT
+                    # Ensure attachment_urls exists
+                    if "attachment_urls" not in message:
+                        message["attachment_urls"] = []
             
             # Find the other participant
             other_participant_id = next((p for p in conversation["participants"] if p != user_id), None)
@@ -375,66 +459,6 @@ async def delete_message(
     except Exception as e:
         print(f"Error deleting message: {e}")
         return False
-
-
-async def send_image_message(
-    conversation_id: str,
-    user_id: str,
-    files: List[object],  # List of UploadFile objects
-    request: Request
-) -> Optional[Dict[str, Any]]:
-    """Send image messages in a conversation."""
-    try:
-        database = request.app.mongodb
-        from utils.file_upload import upload_image_file
-        
-        # Check if conversation exists and user is participant
-        conversation = await database.conversations.find_one({
-            "_id": ObjectId(conversation_id),
-            "participants": user_id
-        })
-        
-        if not conversation:
-            return None
-        
-        # Upload images
-        image_urls = []
-        for file in files:
-            # Upload each image to the conversation_images directory
-            image_url = await upload_image_file(file, "conversation_images")
-            if image_url:
-                image_urls.append(image_url)
-        
-        if not image_urls:
-            return None
-        
-        # Create message with images
-        now = datetime.utcnow()
-        message = {
-            "id": str(ObjectId()),
-            "conversation_id": conversation_id,
-            "sender_id": user_id,
-            "content": "",  # Empty content for image-only messages
-            "read": False,
-            "attachment_urls": image_urls,
-            "is_image_message": True,
-            "created_at": now
-        }
-        
-        # Add message to conversation
-        await database.conversations.update_one(
-            {"_id": ObjectId(conversation_id)},
-            {
-                "$push": {"messages": message},
-                "$set": {"updated_at": now, "last_message": message}
-            }
-        )
-        
-        return message
-        
-    except Exception as e:
-        print(f"Error sending image message: {e}")
-        return None
 
 
 async def archive_conversation(

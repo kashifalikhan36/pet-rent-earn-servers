@@ -1,18 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, File, UploadFile, Form
 from typing import List, Dict, Any, Optional
 
 from schemas.conversation import (
     ConversationCreate, ConversationOut, ConversationWithMessages, 
     ConversationSummary, MessageCreate, MessageOut, ArchiveConversationRequest,
-    ConversationOfferCreate, ConversationOfferOut, OfferResponse
+    ConversationOfferCreate, ConversationOfferOut, OfferResponse, MessageType
 )
 from dependencies.auth import get_current_active_user
 from crud.conversation import (
-    create_conversation, get_conversation, send_message, get_user_conversations,
-    mark_conversation_as_read, delete_message, send_image_message, archive_conversation,
+    create_conversation, get_conversation, send_unified_message, get_user_conversations,
+    mark_conversation_as_read, delete_message, archive_conversation,
     create_conversation_offer, get_conversation_offers, get_conversation_offer, respond_to_offer
 )
 import logging
+import json
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -45,116 +46,6 @@ async def create_conversation_endpoint(
         )
         
     return conversation
-
-
-@router.put("/{conversation_id}/read", status_code=status.HTTP_200_OK)
-async def mark_all_as_read_endpoint(
-    conversation_id: str,
-    request: Request,
-    current_user = Depends(get_current_active_user)
-):
-    """Mark all messages in a conversation as read"""
-    success = await mark_conversation_as_read(
-        conversation_id=conversation_id,
-        user_id=current_user["id"],
-        request=request
-    )
-    
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found or you don't have access"
-        )
-    
-    return {"status": "success", "message": "All messages marked as read"}
-
-
-@router.delete("/{conversation_id}/messages/{message_id}", status_code=status.HTTP_200_OK)
-async def delete_message_endpoint(
-    conversation_id: str,
-    message_id: str,
-    request: Request,
-    current_user = Depends(get_current_active_user)
-):
-    """Delete a message (only sender can delete their own messages)"""
-    success = await delete_message(
-        conversation_id=conversation_id,
-        message_id=message_id,
-        user_id=current_user["id"],
-        request=request
-    )
-    
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Message not found, or you don't have permission to delete it"
-        )
-    
-    return {"status": "success", "message": "Message deleted"}
-
-
-@router.post("/{conversation_id}/images", response_model=MessageOut)
-async def send_images_endpoint(
-    conversation_id: str,
-    request: Request,
-    files: List[UploadFile] = File(..., description="Image files to send"),
-    current_user = Depends(get_current_active_user)
-):
-    """Send image messages in a conversation"""
-    if not files:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No images provided"
-        )
-    
-    # Check file types
-    for file in files:
-        content_type = file.content_type
-        if not content_type or not content_type.startswith('image/'):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File {file.filename} is not an image"
-            )
-    
-    result = await send_image_message(
-        conversation_id=conversation_id,
-        user_id=current_user["id"],
-        files=files,
-        request=request
-    )
-    
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found or failed to upload images"
-        )
-    
-    return result
-
-
-@router.put("/{conversation_id}/archive", status_code=status.HTTP_200_OK)
-async def archive_conversation_endpoint(
-    conversation_id: str,
-    archive_request: ArchiveConversationRequest,
-    request: Request,
-    current_user = Depends(get_current_active_user)
-):
-    """Archive or unarchive a conversation"""
-    success = await archive_conversation(
-        conversation_id=conversation_id,
-        user_id=current_user["id"],
-        archive=archive_request.archive,
-        request=request
-    )
-    
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found or you don't have access"
-        )
-    
-    action = "archived" if archive_request.archive else "unarchived"
-    return {"status": "success", "message": f"Conversation {action}"}
 
 
 @router.get("", response_model=List[ConversationSummary])
@@ -204,30 +95,162 @@ async def get_conversation_endpoint(
     return conversation
 
 
-@router.post("/{conversation_id}/messages", response_model=MessageOut)
+@router.post("/{conversation_id}/send", response_model=MessageOut)
 async def send_message_endpoint(
     conversation_id: str,
-    message: MessageCreate,
     request: Request,
-    current_user = Depends(get_current_active_user)
+    current_user = Depends(get_current_active_user),
+    # Allow both form data and JSON data
+    content: Optional[str] = Form(""),
+    message_type: Optional[str] = Form(MessageType.TEXT),
+    # Support multiple image uploads
+    images: Optional[List[UploadFile]] = File(None)
 ):
-    """Send a new message in a conversation"""
-    result = await send_message(
+    """
+    Professional unified endpoint to send messages with text, images, or both.
+    
+    Supports:
+    - Text only messages: Send with content and message_type="text"
+    - Image only messages: Send with images and message_type="image" 
+    - Mixed messages: Send with both content and images, message_type="mixed"
+    
+    Examples:
+    - Text: content="Hello world", message_type="text"
+    - Images: images=[file1, file2], message_type="image"
+    - Mixed: content="Check these out!", images=[file1], message_type="mixed"
+    """
+    
+    # Validate message type
+    try:
+        msg_type = MessageType(message_type)
+    except ValueError:
+        msg_type = MessageType.TEXT
+    
+    # Validate image files if provided
+    valid_images = []
+    if images:
+        for image in images:
+            if image.content_type and image.content_type.startswith('image/'):
+                valid_images.append(image)
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"File {image.filename} is not a valid image"
+                )
+    
+    # Smart validation based on actual content and files
+    has_content = content and content.strip()
+    has_images = len(valid_images) > 0
+    
+    # Auto-detect message type if not explicitly set or adjust if needed
+    if not has_content and not has_images:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message must have either text content or images"
+        )
+    elif has_content and has_images:
+        msg_type = MessageType.MIXED
+    elif has_images and not has_content:
+        msg_type = MessageType.IMAGE
+    elif has_content and not has_images:
+        msg_type = MessageType.TEXT
+    
+    # Create message data
+    message_data = MessageCreate(
+        content=content or "",
+        message_type=msg_type
+    )
+    
+    # Send unified message
+    result = await send_unified_message(
         conversation_id=conversation_id,
-        message_data=message,
+        message_data=message_data,
         sender_id=current_user["id"],
-        request=request
+        request=request,
+        files=valid_images
     )
     
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found or you don't have access"
+            detail="Conversation not found or failed to send message"
         )
         
-    return result 
+    return result
 
 
+@router.put("/{conversation_id}/read", status_code=status.HTTP_200_OK)
+async def mark_all_as_read_endpoint(
+    conversation_id: str,
+    request: Request,
+    current_user = Depends(get_current_active_user)
+):
+    """Mark all messages in a conversation as read"""
+    success = await mark_conversation_as_read(
+        conversation_id=conversation_id,
+        user_id=current_user["id"],
+        request=request
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found or you don't have access"
+        )
+    
+    return {"status": "success", "message": "All messages marked as read"}
+
+
+@router.delete("/{conversation_id}/messages/{message_id}", status_code=status.HTTP_200_OK)
+async def delete_message_endpoint(
+    conversation_id: str,
+    message_id: str,
+    request: Request,
+    current_user = Depends(get_current_active_user)
+):
+    """Delete a message (only sender can delete their own messages)"""
+    success = await delete_message(
+        conversation_id=conversation_id,
+        message_id=message_id,
+        user_id=current_user["id"],
+        request=request
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message not found, or you don't have permission to delete it"
+        )
+    
+    return {"status": "success", "message": "Message deleted"}
+
+
+@router.put("/{conversation_id}/archive", status_code=status.HTTP_200_OK)
+async def archive_conversation_endpoint(
+    conversation_id: str,
+    archive_request: ArchiveConversationRequest,
+    request: Request,
+    current_user = Depends(get_current_active_user)
+):
+    """Archive or unarchive a conversation"""
+    success = await archive_conversation(
+        conversation_id=conversation_id,
+        user_id=current_user["id"],
+        archive=archive_request.archive,
+        request=request
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found or you don't have access"
+        )
+    
+    action = "archived" if archive_request.archive else "unarchived"
+    return {"status": "success", "message": f"Conversation {action}"}
+
+
+# OFFER MANAGEMENT ENDPOINTS
 @router.post("/{conversation_id}/offers", response_model=ConversationOfferOut)
 async def create_offer_endpoint(
     conversation_id: str,
@@ -316,4 +339,82 @@ async def respond_to_offer_endpoint(
             detail="Offer not found, you don't have access, or the offer is no longer pending"
         )
     
-    return updated_offer 
+    return updated_offer
+
+
+# LEGACY ENDPOINTS FOR BACKWARDS COMPATIBILITY (Deprecated)
+@router.post("/{conversation_id}/messages", response_model=MessageOut, deprecated=True)
+async def send_text_message_legacy(
+    conversation_id: str,
+    message: MessageCreate,
+    request: Request,
+    current_user = Depends(get_current_active_user)
+):
+    """
+    DEPRECATED: Use /send endpoint instead.
+    Legacy endpoint for sending text messages only.
+    """
+    result = await send_unified_message(
+        conversation_id=conversation_id,
+        message_data=message,
+        sender_id=current_user["id"],
+        request=request,
+        files=None
+    )
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found or you don't have access"
+        )
+        
+    return result
+
+
+@router.post("/{conversation_id}/images", response_model=MessageOut, deprecated=True)
+async def send_images_legacy(
+    conversation_id: str,
+    request: Request,
+    files: List[UploadFile] = File(..., description="Image files to send"),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    DEPRECATED: Use /send endpoint instead.
+    Legacy endpoint for sending images only.
+    """
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No images provided"
+        )
+    
+    # Check file types
+    for file in files:
+        content_type = file.content_type
+        if not content_type or not content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File {file.filename} is not an image"
+            )
+    
+    # Create image message
+    message_data = MessageCreate(
+        content="",
+        message_type=MessageType.IMAGE
+    )
+    
+    result = await send_unified_message(
+        conversation_id=conversation_id,
+        message_data=message_data,
+        sender_id=current_user["id"],
+        request=request,
+        files=files
+    )
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found or failed to upload images"
+        )
+    
+    return result 

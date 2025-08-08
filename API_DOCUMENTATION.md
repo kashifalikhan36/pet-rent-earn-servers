@@ -532,33 +532,52 @@ const getConversation = async (conversationId: string) => {
 };
 ```
 
-### 4. Send Message
-**POST** `/api/conversations/{conversation_id}/messages`
-Sends a text message in a conversation.
+### 4. Send Message (Unified) ⭐ NEW
+**POST** `/api/conversations/{conversation_id}/send`
+Professional unified endpoint to send text, images, or both in a single request with smart auto-detection.
 
 ```typescript
-const sendMessage = async (conversationId: string, content: string) => {
+// Send text message (message_type is auto-detected)
+const sendTextMessage = async (conversationId: string, content: string) => {
   const token = localStorage.getItem('authToken');
-  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/messages`, {
-    content
-  }, {
-    headers: { 'Authorization': `Bearer ${token}` }
+  const formData = new FormData();
+  formData.append('content', content);
+  // message_type automatically detected as 'text'
+  
+  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/send`, formData, {
+    headers: { 
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'multipart/form-data'
+    }
   });
   return response.data;
 };
-```
 
-### 5. Send Images
-**POST** `/api/conversations/{conversation_id}/images`
-Sends image messages in a conversation.
-
-```typescript
+// Send images only (message_type is auto-detected)
 const sendImages = async (conversationId: string, files: File[]) => {
   const token = localStorage.getItem('authToken');
   const formData = new FormData();
-  files.forEach(file => formData.append('files', file));
+  // message_type automatically detected as 'image'
+  files.forEach(file => formData.append('images', file));
   
-  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/images`, formData, {
+  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/send`, formData, {
+    headers: { 
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+  return response.data;
+};
+
+// Send text with images (message_type is auto-detected as 'mixed')
+const sendMixedMessage = async (conversationId: string, content: string, files: File[]) => {
+  const token = localStorage.getItem('authToken');
+  const formData = new FormData();
+  formData.append('content', content);
+  // message_type automatically detected as 'mixed'
+  files.forEach(file => formData.append('images', file));
+  
+  const response = await axios.post(`https://api.cvflow.tech/api/conversations/${conversationId}/send`, formData, {
     headers: { 
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'multipart/form-data'
@@ -568,7 +587,17 @@ const sendImages = async (conversationId: string, files: File[]) => {
 };
 ```
 
-### 6. Create Offer
+**Note**: The `message_type` parameter is optional - the API automatically detects the type based on content and images provided!
+
+### 5. Send Message (Legacy)
+**POST** `/api/conversations/{conversation_id}/messages` - DEPRECATED
+Legacy endpoint for text messages only. Use the unified `/send` endpoint instead.
+
+### 6. Send Images (Legacy)
+**POST** `/api/conversations/{conversation_id}/images` - DEPRECATED
+Legacy endpoint for images only. Use the unified `/send` endpoint instead.
+
+### 7. Create Offer
 **POST** `/api/conversations/{conversation_id}/offers`
 Creates a rental offer within a conversation.
 
@@ -588,7 +617,7 @@ const createOffer = async (conversationId: string, offerData: {
 };
 ```
 
-### 7. Respond to Offer
+### 8. Respond to Offer
 **POST** `/api/conversations/{conversation_id}/offers/{offer_id}/respond`
 Accepts or rejects an offer in a conversation.
 
